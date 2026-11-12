@@ -22,7 +22,7 @@ To use a production build for a local demo, copy [the environment example](.env.
 1. Open the purchasing assistant. Try “I need 20 cases of still bottled water delivered to Woodstock, Cape Town by Friday.” Review the editable draft and set a future date if needed.
 2. Find suppliers. The progress indicator follows the matching request. Select the suppliers to invite and send the RFQ.
 3. Switch to each invited supplier to submit a different delivered price. Return to the buyer to compare the quotes and accept a version. The accepted quote reserves stock.
-4. Open the order and fund the labelled demo escrow. Switch to the winning supplier and dispatch.
+4. Open **Payments**, review the approved order and its rand breakdown, then confirm the labelled demo reserve. Switch to the winning supplier and dispatch.
 5. Return to the buyer, enter 12 accepted cases, review the exact release, and generate the handover QR. Scan it from the supplier account or paste the token into the scanner. Review the release and confirm. A second attempt with the same token is rejected.
 6. Repeat for the remaining eight cases. Download the order summary or settlement receipt, leave the order-linked review, and use **Buy again** to draft a fresh request.
 7. Use the seeded dispute to demonstrate reviewer access and the distinction between released and outstanding funds.

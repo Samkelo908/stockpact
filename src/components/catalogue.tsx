@@ -2,64 +2,137 @@
 
 import Image from "next/image";
 import { useState, type FormEvent } from "react";
-import { ArrowRight, Boxes, ClipboardList, Download, Droplets, Heart, Package, Plus, Search, ShoppingBag, Star, Store, Upload } from "lucide-react";
+import { ArrowRight, Boxes, ClipboardList, Coffee, Download, Droplets, Heart, MapPin, Package, Plus, Search, ShoppingBag, Star, Store, Upload } from "lucide-react";
 import type { Listing, MarketplaceState, RequestDraft } from "../shared/marketplace";
-import { cents, companyName, companyOf, csv, download, type Navigate, type RunAction } from "./client";
+import { cents, companyOf, csv, download, type Navigate, type RunAction } from "./client";
 import { freshDraft } from "./purchasing";
 import { Dialog, Empty, PanelTitle, Tag, ViewTitle, dateLabel, money, number } from "./ui";
 
 type CatalogueProps = { state: MarketplaceState; busy: string; run: RunAction; navigate: Navigate; selected: string };
 
-function categoryArt(listing: Listing) {
-  if (/water|beverage/i.test(`${listing.category} ${listing.name}`)) return { tint: "blue", icon: Droplets, image: "/listing-water.webp" };
-  if (/packaging/i.test(listing.category)) return { tint: "amber", icon: Boxes, image: "/listing-packaging.webp" };
-  if (/cleaning/i.test(listing.category)) return { tint: "mint", icon: Package, image: /sanitis|clean/i.test(listing.name) ? "/listing-cleaning.webp" : "" };
-  return { tint: "violet", icon: ShoppingBag, image: "" };
+const cataloguePhotos: Record<string, string> = {
+  "demo-tomatoes-a": "/listing-tomatoes.webp",
+  "demo-tomatoes-b": "/listing-tomatoes.webp",
+  "demo-water-a": "/listing-water.webp",
+  "demo-water-b": "/listing-water.webp",
+  "demo-oil": "/listing-oil.webp",
+  "demo-coffee": "/listing-coffee.webp",
+  "demo-boxes": "/listing-packaging.webp",
+};
+
+function catalogueIcon(category: string) {
+  if (/beverage/i.test(category)) return Droplets;
+  if (/packaging|office/i.test(category)) return Boxes;
+  if (/food/i.test(category)) return Coffee;
+  return ShoppingBag;
+}
+
+const singularUnits: Record<string, string> = { cases: "case", boxes: "box", bottles: "bottle", bags: "bag", packs: "pack", units: "unit" };
+
+function priceUnit(unit: string) {
+  const key = unit.toLowerCase();
+  return Object.hasOwn(singularUnits, key) ? singularUnits[key] : unit;
 }
 
 export function Marketplace({ state, busy, run, query, setQuery, startDraft }: CatalogueProps & { query: string; setQuery: (query: string) => void; startDraft: (draft: RequestDraft) => void }) {
-  const [category, setCategory] = useState("All products");
+  const [category, setCategory] = useState("");
+  const [area, setArea] = useState("");
+  const [sort, setSort] = useState("catalogue");
   const [saved, setSaved] = useState(false);
   const [page, setPage] = useState(1);
   const [detail, setDetail] = useState<string | null>(null);
-  const active = state.listings.filter((listing) => !listing.archived);
-  const categories = ["All products", ...new Set(active.map((listing) => listing.category))];
-  const listings = active.filter((listing) => (category === "All products" || category === listing.category) && (!saved || state.favorites.includes(listing.id)) && `${listing.name} ${listing.category} ${listing.description} ${companyName(state, listing.supplierId)}`.toLowerCase().includes(query.trim().toLowerCase()));
+  const companies = new Map(state.companies.map((company) => [company.id, company]));
+  const active = state.listings.filter((listing) => !listing.archived).map((listing) => ({
+    ...listing, supplier: companies.get(listing.supplierId),
+  }));
+  const categories = [...new Set(active.map((listing) => listing.category))].sort();
+  const deliveryAreas = [...new Set(active.flatMap((listing) => listing.deliveryAreas))].sort();
+  const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const listings = active.filter((listing) => {
+    const searchable = [listing.name, listing.category, listing.description, listing.brand, listing.supplier?.name, listing.supplier?.location, ...listing.deliveryAreas].join(" ").toLowerCase();
+    return (!category || category === listing.category) && (!area || listing.deliveryAreas.includes(area)) &&
+      (!saved || state.favorites.includes(listing.id)) && terms.every((term) => searchable.includes(term));
+  });
+  if (sort !== "catalogue") {
+    listings.sort((first, second) => {
+      if (first.priceCents === null) return second.priceCents === null ? 0 : 1;
+      if (second.priceCents === null) return -1;
+      return sort === "price-low" ? first.priceCents - second.priceCents : second.priceCents - first.priceCents;
+    });
+  }
   const pages = Math.max(1, Math.ceil(listings.length / 6));
   const currentPage = Math.min(page, pages);
   const current = listings.slice((currentPage - 1) * 6, currentPage * 6);
   const selected = detail ? active.find((listing) => listing.id === detail) : undefined;
-  const supplier = companyOf(state, selected?.supplierId);
+  const supplier = selected?.supplier;
   const supplierReviews = state.reviews.filter((review) => review.supplierId === supplier?.id);
   const own = selected?.supplierId === state.actor?.companyId;
   const buyer = companyOf(state, state.actor?.companyId);
   const canRequest = !own && buyer?.capabilities.includes("buyer") && ["owner", "purchaser"].includes(state.actor?.role ?? "");
 
   function requestListing(listing: Listing) {
+    setDetail(null);
     startDraft({ ...freshDraft(buyer?.location || "Cape Town"), product: listing.name, category: listing.category, unit: listing.unit, quantity: listing.minimum, packSize: listing.packSize });
   }
 
+  function resetFilters() {
+    setCategory("");
+    setArea("");
+    setSaved(false);
+    setSort("catalogue");
+    setQuery("");
+    setPage(1);
+  }
+
   return <>
-    <ViewTitle title="Marketplace" subtitle="Discover suppliers and check listed availability before requesting a quote." />
-    <div className="stack">
-      <section className="card panel stack" aria-label="Marketplace filters">
-        <label className="search-field"><span className="sr-only">Search listings</span><Search size={17} /><input type="search" value={query} onChange={(event) => { setQuery(event.currentTarget.value); setPage(1); }} placeholder="Search by product, category or supplier" /></label>
-        <div className="filters">{categories.map((item) => <button type="button" key={item} className="filter" aria-pressed={category === item} onClick={() => { setCategory(item); setPage(1); }}>{item}</button>)}<button type="button" className="filter filter-icon" aria-pressed={saved} onClick={() => { setSaved((previous) => !previous); setPage(1); }}><Heart size={14} />Favourites</button></div>
+    <div className="market">
+      <header className="market-heading">
+        <div>
+          <h1>Marketplace</h1>
+          <p>Source stock from South African wholesalers.</p>
+        </div>
+        {buyer?.location && <span className="market-location"><MapPin size={17} aria-hidden="true" /><span><small>Your location</small>{buyer.location}</span></span>}
+      </header>
+      <section className="market-filters" aria-label="Marketplace filters">
+        <div className="market-filter-bar">
+          <label className="market-search"><span className="sr-only">Search listings</span><Search size={19} aria-hidden="true" /><input type="search" value={query} onChange={(event) => { setQuery(event.currentTarget.value); setPage(1); }} placeholder="Search stock, suppliers or suburbs" /></label>
+          <label className="market-area"><MapPin size={17} aria-hidden="true" /><span className="sr-only">Delivery area</span><select value={area} onChange={(event) => { setArea(event.currentTarget.value); setPage(1); }}><option value="">All delivery areas</option>{deliveryAreas.map((item) => <option key={item}>{item}</option>)}</select></label>
+          <button type="button" className="market-saved" aria-pressed={saved} onClick={() => { setSaved((previous) => !previous); setPage(1); }}><Heart size={17} aria-hidden="true" />Favourites</button>
+        </div>
+        <div className="market-categories" role="group" aria-label="Product categories">
+          <button type="button" aria-pressed={!category} onClick={() => { setCategory(""); setPage(1); }}>All products</button>
+          {categories.map((item) => <button type="button" key={item} aria-pressed={category === item} onClick={() => { setCategory(item); setPage(1); }}>{item}</button>)}
+        </div>
       </section>
-      <p className="small-note" role="status">{number(listings.length)} {listings.length === 1 ? "listing" : "listings"} found</p>
-      {!current.length ? <section className="card panel"><Empty title="No matching listings" detail="Try another product, supplier or category." icon={Store} /></section> : <div className="listing-grid">{current.map((listing) => {
-        const { tint, icon: Icon, image } = categoryArt(listing);
-        const favourite = state.favorites.includes(listing.id);
-        return <article className="card listing-card" key={listing.id}><div className={`listing-picture ${tint}`}>
-          {image && listing.demo ? <Image src={image} alt="" fill sizes="(max-width: 760px) 50vw, 30vw" /> : <Icon size={34} strokeWidth={1.4} />}
-          <button type="button" className="icon-button" disabled={!!busy} aria-label={`${favourite ? "Remove from" : "Add to"} favourites: ${listing.name}`} aria-pressed={favourite} onClick={() => void run("toggleFavorite", { listingId: listing.id })}><Heart size={16} /></button>
-        </div><div className="listing-details"><div><p>{listing.category}</p><h2>{listing.name}</h2><p>{companyName(state, listing.supplierId)}</p></div><div><strong className="listing-price">{listing.priceCents === null ? "Request pricing" : money(listing.priceCents)}</strong>{listing.priceCents !== null && <p>Per {listing.unit}</p>}</div><p>{number(listing.available)} {listing.unit} listed{listing.surplus ? " · Surplus stock" : ""}</p><button className="secondary" type="button" onClick={() => setDetail(listing.id)}>View listing<ArrowRight size={14} /></button></div></article>;
-      })}</div>}
-      {pages > 1 && <div className="button-row"><button type="button" className="secondary" disabled={currentPage === 1} onClick={() => setPage(currentPage - 1)}>Previous</button><span className="small-note">Page {currentPage} of {pages}</span><button type="button" className="secondary" disabled={currentPage === pages} onClick={() => setPage(currentPage + 1)}>Next</button></div>}
+      <div className="market-results">
+        <p role="status">{number(listings.length)} {listings.length === 1 ? "listing" : "listings"}</p>
+        <label><span>Sort by</span><select value={sort} onChange={(event) => { setSort(event.currentTarget.value); setPage(1); }}><option value="catalogue">Catalogue order</option><option value="price-low">Lowest listed price</option><option value="price-high">Highest listed price</option></select></label>
+      </div>
+      {!current.length ? <section className="card panel"><Empty title="No matching listings" detail="Try another product, supplier or delivery area." icon={Store} action={<button type="button" className="secondary" onClick={resetFilters}>Clear filters</button>} /></section> :
+        <div className="market-grid">{current.map((listing) => {
+          const image = listing.demo ? cataloguePhotos[listing.id] : undefined;
+          const Icon = catalogueIcon(listing.category);
+          const favourite = state.favorites.includes(listing.id);
+          return <article className="market-listing" key={listing.id}>
+            <div className="market-photo">
+              {image ? <Image src={image} alt="" fill sizes="(max-width: 360px) 100vw, (max-width: 760px) 50vw, 33vw" /> : <Icon size={40} strokeWidth={1.4} aria-hidden="true" />}
+              <button type="button" className="icon-button market-favourite" disabled={!!busy} aria-label={`${favourite ? "Remove from" : "Add to"} favourites: ${listing.name}`} aria-pressed={favourite} onClick={() => void run("toggleFavorite", { listingId: listing.id })}><Heart size={18} /></button>
+            </div>
+            <div className="market-product">
+              <p className="market-category">{listing.category}</p>
+              <h2>{listing.name}</h2>
+              <p className="market-supplier">{listing.supplier?.name ?? "Supplier"}{listing.supplier?.location && <><span aria-hidden="true"> · </span>{listing.supplier.location.split(",")[0]}</>}</p>
+              <div className="market-price"><strong>{listing.priceCents === null ? "Price on request" : money(listing.priceCents)}</strong>{listing.priceCents !== null && <span>/ {priceUnit(listing.unit)}</span>}</div>
+              <p className="market-stock"><Package size={15} aria-hidden="true" />{number(listing.available)} {listing.unit} listed{listing.surplus && " · Surplus stock"}</p>
+              <button className="market-detail" type="button" onClick={() => setDetail(listing.id)}>View listing<ArrowRight size={17} /></button>
+            </div>
+          </article>;
+        })}</div>}
+      {pages > 1 && <div className="market-pagination button-row" role="group" aria-label="Marketplace pages"><button type="button" className="secondary" disabled={currentPage === 1} onClick={() => setPage(currentPage - 1)}>Previous</button><span className="small-note">Page {currentPage} of {pages}</span><button type="button" className="secondary" disabled={currentPage === pages} onClick={() => setPage(currentPage + 1)}>Next</button></div>}
     </div>
     {selected && <Dialog title={selected.name} onClose={() => setDetail(null)}><div className="stack">
       <div className="subcard small-stack"><div className="split-line"><div><h3>{supplier?.name ?? "Supplier"}</h3><p>{supplier?.location} · {supplierReviews.length ? `${(supplierReviews.reduce((sum, review) => sum + review.rating, 0) / supplierReviews.length).toFixed(1)} / 5 (${supplierReviews.length})` : "No reviews yet"}</p></div>{supplier?.verification.business === "verified" && <Tag value={supplier.demo ? "Demo verified" : "Verified business"} variant="green" />}</div><p>{selected.description}</p>{selected.brand && <p>Brand {selected.brand}</p>}</div>
-      <dl className="details-grid"><div><dt>Listed stock</dt><dd>{selected.available} {selected.unit}</dd></div><div><dt>Minimum and pack</dt><dd>{selected.minimum} {selected.unit} · {selected.packSize}/pack</dd></div><div><dt>Delivery areas</dt><dd>{selected.deliveryAreas.join(", ") || "Ask supplier"}</dd></div><div><dt>Collection</dt><dd>{selected.collection ? "Available" : "Unavailable"}</dd></div><div><dt>Listed lead time</dt><dd>{selected.leadDays} day(s)</dd></div><div><dt>Stock last updated</dt><dd>{dateLabel(selected.updatedAt)}</dd></div></dl>
+      <dl className="details-grid"><div><dt>Listed price</dt><dd>{selected.priceCents === null ? "Price on request" : money(selected.priceCents) + " / " + priceUnit(selected.unit)}</dd></div><div><dt>Listed stock</dt><dd>{number(selected.available)} {selected.unit}</dd></div><div><dt>Minimum order</dt><dd>{number(selected.minimum)} {selected.minimum === 1 ? priceUnit(selected.unit) : selected.unit}</dd></div><div><dt>Units per pack</dt><dd>{number(selected.packSize)}</dd></div><div><dt>Delivery areas</dt><dd>{selected.deliveryAreas.join(", ") || "Ask supplier"}</dd></div><div><dt>Collection</dt><dd>{selected.collection ? "Available" : "Unavailable"}</dd></div><div><dt>Listed lead time</dt><dd>{selected.leadDays} {selected.leadDays === 1 ? "day" : "days"}</dd></div><div><dt>Stock last updated</dt><dd>{dateLabel(selected.updatedAt)}</dd></div></dl>
       <p className="small-note">A supplier quote confirms current availability, delivery and pricing.</p>
       <div className="button-row">{canRequest && <button className="primary" type="button" onClick={() => requestListing(selected)}><ClipboardList size={16} />Request current pricing</button>}{supplier && !own && <button className="secondary" type="button" disabled={!!busy} onClick={() => void run("preferSupplier", { supplierId: supplier.id })}><Star size={16} />{state.preferredSuppliers.includes(supplier.id) ? "Remove preferred supplier" : "Prefer supplier"}</button>}</div>
     </div></Dialog>}

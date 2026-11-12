@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
-import { ArrowRight, Bell, Boxes, Building2, ChevronDown, ChevronRight, CircleAlert, CircleCheck, ClipboardList, House, LogOut, Menu, Package, PackageCheck, Search, Settings, ShieldCheck, Sparkles, Star, Store, Truck, Wallet, X, type LucideIcon } from "lucide-react";
+import { ArrowRight, Banknote, Bell, Boxes, Building2, ChevronDown, ChevronRight, CircleAlert, CircleCheck, ClipboardList, House, LogOut, Menu, Package, PackageCheck, Search, Settings, ShieldCheck, Star, Store, Truck, X, type LucideIcon } from "lucide-react";
 import type { MarketplaceState, RequestDraft } from "../shared/marketplace";
 import { companyOf, initials, views, type Navigate, type Result, type RunAction, type View } from "./client";
 import { Assistant, Dashboard } from "./purchasing";
@@ -14,13 +14,13 @@ import { Busy, Dialog, DialogError, Empty, Tag, dateLabel, titleCase } from "./u
 
 const nav: { id: View; title: string; short: string; icon: LucideIcon; group: "Workspace" | "Operations" | "Account" }[] = [
   { id: "home", title: "Overview", short: "Home", icon: House, group: "Workspace" },
-  { id: "assistant", title: "AI purchasing", short: "AI", icon: Sparkles, group: "Workspace" },
+  { id: "assistant", title: "Source stock", short: "Source", icon: Search, group: "Workspace" },
   { id: "marketplace", title: "Marketplace", short: "Market", icon: Store, group: "Workspace" },
   { id: "requests", title: "Requests & quotes", short: "Requests", icon: ClipboardList, group: "Workspace" },
   { id: "orders", title: "Orders", short: "Orders", icon: PackageCheck, group: "Workspace" },
   { id: "inventory", title: "Inventory", short: "Stock", icon: Package, group: "Operations" },
   { id: "deliveries", title: "Deliveries", short: "Delivery", icon: Truck, group: "Operations" },
-  { id: "funds", title: "Funds", short: "Funds", icon: Wallet, group: "Operations" },
+  { id: "funds", title: "Payments", short: "Payments", icon: Banknote, group: "Operations" },
   { id: "reviews", title: "Suppliers & reviews", short: "Reviews", icon: Star, group: "Operations" },
   { id: "settings", title: "Company settings", short: "Settings", icon: Settings, group: "Account" },
   { id: "admin", title: "Administration", short: "Admin", icon: ShieldCheck, group: "Account" },
@@ -187,13 +187,13 @@ export function StockPact() {
         {route.view === "orders" && <Orders {...common} startDraft={startDraft} />}
         {route.view === "inventory" && <Inventory {...common} />}
         {route.view === "deliveries" && <Deliveries {...common} />}
-        {route.view === "funds" && <Funds state={state} navigate={navigate} />}
+        {route.view === "funds" && <Funds state={state} navigate={navigate} busy={busy} run={run} />}
         {route.view === "reviews" && <Reviews {...common} startDraft={startDraft} />}
         {route.view === "settings" && <SettingsView key={actor.companyId} {...common} />}
         {route.view === "admin" && <Admin {...common} />}</>}
       </main>
     </div>
-    <nav className="bottom-nav" aria-label="Mobile navigation">{links.filter((item) => (actor.role === "driver" ? ["home", "orders", "deliveries"] : actor.role === "reviewer" ? ["home", "orders", "admin"] : ["home", "assistant", "marketplace", "orders"]).includes(item.id)).map(({ id, short, icon: Icon }) => <button key={id} type="button" aria-current={route.view === id ? "page" : undefined} onClick={() => navigate(id)}><Icon size={19} />{short}</button>)}<button type="button" onClick={() => setDialog("more")}><Menu size={20} />More</button></nav>
+    <nav className="bottom-nav" aria-label="Mobile navigation">{links.filter((item) => (actor.role === "driver" ? ["home", "orders", "deliveries"] : actor.role === "reviewer" ? ["home", "orders", "admin"] : ["home", "marketplace", "orders", "funds"]).includes(item.id)).map(({ id, short, icon: Icon }) => <button key={id} type="button" aria-current={route.view === id ? "page" : undefined} onClick={() => navigate(id)}><Icon size={19} />{short}</button>)}<button type="button" onClick={() => setDialog("more")}><Menu size={20} />More</button></nav>
     {dialog === "more" && <Dialog title="Workspace navigation" onClose={() => setDialog(null)}><div className="small-stack">{links.map(({ id, title, icon: Icon }) => <button type="button" key={id} className="list-button" onClick={() => navigate(id)}><Icon size={17} /><div><strong>{title}</strong></div><ChevronRight size={15} /></button>)}</div></Dialog>}
     {dialog === "search" && <Dialog title="Search marketplace" onClose={() => setDialog(null)}><form className="stack" onSubmit={openMarket}><label className="field">Product, category or supplier<input type="search" autoFocus value={query} onChange={(event) => setQuery(event.currentTarget.value)} placeholder="Search products" /></label><div><button className="primary" type="submit"><Search size={16} />Search marketplace</button></div></form></Dialog>}
     {dialog === "profile" && <Dialog title="Account & workspace" onClose={() => setDialog(null)}><div className="stack">
@@ -241,6 +241,6 @@ function AuthScreen({ state, busy, run, notice }: { state: MarketplaceState; bus
       <button type="submit" className="primary" disabled={!!busy}>{mode === "register" ? "Create workspace" : mode === "recovery" ? "Request reset link" : mode === "reset" ? "Update password" : "Sign in"}<ArrowRight size={16} /></button>
     </form>
     <div className="button-row"><button type="button" className="secondary" onClick={() => { setStatus(null); setMode(mode === "signIn" ? "register" : "signIn"); }}>{mode === "signIn" ? "Register a business" : "Back to sign-in"}</button>{mode === "signIn" && <button type="button" className="secondary" onClick={() => { setStatus(null); setMode("recovery"); }}>Forgot password</button>}</div>
-    {state.demo && !!state.roles.length && <button type="button" className="secondary" disabled={!!busy} onClick={() => void run("switchRole", { role: "buyer" })}><Sparkles size={16} />Open fictional demo</button>}
+    {state.demo && !!state.roles.length && <button type="button" className="secondary" disabled={!!busy} onClick={() => void run("switchRole", { role: "buyer" })}><Boxes size={16} />Open fictional demo</button>}
   </section></main>;
 }

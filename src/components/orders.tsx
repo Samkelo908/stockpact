@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import { AlertCircle, AlertTriangle, Check, ClipboardCheck, Download, FileText, PackageCheck, Paperclip, QrCode, RotateCw, Send, Star, Truck, Wallet } from "lucide-react";
+import { AlertCircle, AlertTriangle, ArrowDownLeft, ArrowDownToLine, ArrowRight, ArrowUpRight, Check, ClipboardCheck, Download, FileText, LockKeyhole, PackageCheck, Paperclip, QrCode, RotateCw, Search, Send, ShieldCheck, Star, Truck, Wallet } from "lucide-react";
 import type { DeliveryAuthorization, MarketplaceState, Order, OrderTransaction, RequestDraft } from "../shared/marketplace";
 import { deliveryAmountCents } from "../integrations/escrow/shared";
 import { AuthorizeTestnetDelivery, OrderFunding } from "../integrations/escrow/controls";
@@ -10,15 +10,31 @@ import { QrDialog } from "./delivery-qr";
 import { Busy, Dialog, Empty, PanelTitle, Tag, ViewTitle, dateLabel, money, number } from "./ui";
 
 type OrderProps = { state: MarketplaceState; order: Order; busy: string; run: RunAction; navigate: Navigate; startDraft: (draft: RequestDraft) => void };
+type PaymentMode = OrderTransaction["mode"];
+
+const transactionKinds = {
+  funding: { label: "Escrow funding", filter: "Funding", icon: ArrowDownToLine },
+  release: { label: "Supplier release", filter: "Releases", icon: ArrowUpRight },
+  refund: { label: "Buyer refund", filter: "Refunds", icon: ArrowDownLeft },
+} as const;
+
+function paymentAmount(value: number, mode: PaymentMode, unit?: string, currency?: string) {
+  return mode === "testnet" ? `${(value / 100).toFixed(2)} ${unit ?? "test tokens"}` : money(value, currency);
+}
 
 function receipt(order: Order, transaction?: OrderTransaction) {
-  const lines = ["StockPact order record", `Order ${order.reference}`, `Goods: ${order.product}`, `Quantity: ${order.quantity} ${order.unit}`, `Delivery: ${order.location} · ${dateLabel(order.deliveryDate)}`, `Quoted total: ${money(order.totalCents)} ZAR`, ""];
+  const lines = [transaction ? "StockPact payment receipt" : "StockPact order record", `Order ${order.reference}`, `Goods: ${order.product}`, `Quantity: ${order.quantity} ${order.unit}`, `Delivery: ${order.location} · ${dateLabel(order.deliveryDate)}`, `Quoted total: ${money(order.totalCents, order.currency)} (${order.currency ?? "ZAR"})`, ""];
   for (const item of transaction ? [transaction] : order.transactions) {
-    const amount = item.mode === "demo" ? `${money(item.amountCents)} demo value` : `${(item.amountCents / 100).toFixed(2)} nominal test tokens`;
-    lines.push(`${item.kind.toUpperCase()} · ${item.status} · ${amount} · ${dateLabel(item.createdAt)} · ${item.hash ?? "Simulated record"}`);
+    const amount = paymentAmount(item.amountCents, item.mode, undefined, order.currency);
+    lines.push(`${transactionKinds[item.kind].label} · ${item.status} · ${amount}`,
+      `Record: ${item.id}`, `Date: ${dateLabel(item.createdAt)}`, `Mode: ${item.mode === "demo" ? "Simulated payment" : "Testnet"}`);
+    if (item.quantity != null) lines.push(`Quantity: ${item.quantity} ${order.unit}`);
+    if (item.hash) lines.push(`Transaction hash: ${item.hash}`);
+    lines.push("");
   }
-  lines.push("", "This order record is not a tax invoice.");
-  download(`${order.reference}${transaction ? `-${transaction.kind}-receipt` : "-summary"}.txt`, lines.join("\n"));
+  lines.push("Tax invoices are issued by the supplier.");
+  const suffix = transaction ? `-${transaction.kind}-receipt-${transaction.id.slice(-8)}` : "-summary";
+  download(`${order.reference}${suffix}.txt`, lines.join("\n"));
 }
 
 export function Orders({ state, selected, busy, run, navigate, startDraft }: Omit<OrderProps, "order"> & { selected: string }) {
@@ -70,10 +86,10 @@ function OrderDetail({ state, order, busy, run, navigate, startDraft }: OrderPro
       <dl className="details-grid"><div><dt>Quoted total</dt><dd>{money(order.totalCents, order.currency)}</dd></div><div><dt>Accepted quantity</dt><dd>{number(order.acceptedQuantity)} / {number(order.quantity)} {order.unit}</dd></div><div><dt>Delivery area</dt><dd>{order.location}</dd></div><div><dt>Delivery commitment</dt><dd>{dateLabel(order.deliveryDate)}</dd></div><div><dt>Funds held</dt><dd>{testnet ? `${((order.fundedCents - order.releasedCents - order.refundedCents) / 100).toFixed(2)} test tokens` : money(order.fundedCents - order.releasedCents - order.refundedCents, order.currency)}</dd></div><div><dt>Released</dt><dd>{testnet ? `${(order.releasedCents / 100).toFixed(2)} test tokens` : money(order.releasedCents, order.currency)}</dd></div>{order.refundedQuantity ? <div><dt>Refunded quantity</dt><dd>{number(order.refundedQuantity)} {order.unit}</dd></div> : null}{order.packSize ? <div><dt>Pack size</dt><dd>{order.packSize} per pack</dd></div> : null}</dl>
       {order.specification && <div className="subcard"><h3>Accepted specification</h3><p>{order.specification}</p></div>}
       {dispute && <div className="notice notice-warn"><AlertTriangle size={17} /><div><strong>Dispute open · {money(dispute.amountCents)} of quoted value</strong><p>{dispute.reason}</p></div></div>}
-      {order.activeAuthorization && <div className="notice"><QrCode size={17} /><div><strong>{order.activeAuthorization.quantity} {order.unit} authorised</strong><p>The supplier or authorised driver can accept the handover before the QR expires.</p></div></div>}
+      {order.activeAuthorization && <div className="notice"><QrCode size={17} /><div><strong>{order.activeAuthorization.quantity} {order.unit} authorised</strong><p>{testnet ? "The supplier can accept with its linked wallet before the QR expires." : "The supplier or authorised driver can accept the handover before the QR expires."}</p></div></div>}
       <div className="button-row">
         {canPay && order.status === "approval" && <button type="button" className="primary" disabled={!!busy} onClick={() => void run("approveOrder", { orderId: order.id }, "Purchase approved.")}><ClipboardCheck size={16} />Approve purchase</button>}
-        {canPay && order.status === "awaiting_funding" && (testnet ? <OrderFunding state={state} order={order} busy={busy} run={run} /> : state.actor?.demoRole ? <button type="button" className="primary" disabled={!!busy} onClick={() => setDialog("fund")}><Wallet size={16} />Reserve demo funds</button> : <div className="notice notice-warn"><Wallet size={16} />Testnet funding is unavailable for this company.</div>)}
+        {canPay && order.status === "awaiting_funding" && (testnet || state.actor?.demoRole ? <button type="button" className="primary" disabled={!!busy} onClick={() => setDialog("fund")}><Wallet size={16} />{testnet ? "Review payment" : "Reserve demo funds"}</button> : <div className="notice notice-warn"><Wallet size={16} />Testnet funding is unavailable for this company.</div>)}
         {canPay && ["approval", "awaiting_funding"].includes(order.status) && !order.transactions.some((item) => item.status === "pending") && <button type="button" className="secondary" disabled={!!busy} onClick={() => setDialog("cancel")}>Cancel order</button>}
         {sales && order.status === "funded" && <button type="button" className="primary" disabled={!!busy} onClick={() => void run("dispatchOrder", { orderId: order.id }, "Order marked dispatched.")}><Truck size={16} />Dispatch goods</button>}
         {sales && !testnet && ["funded", "dispatched", "partial"].includes(order.status) && driverList.length > 0 && <button type="button" className="secondary" disabled={!!busy} onClick={() => setDialog("driver")}><Truck size={16} />{order.driverId ? "Change driver" : "Assign driver"}</button>}
@@ -94,14 +110,51 @@ function OrderDetail({ state, order, busy, run, navigate, startDraft }: OrderPro
     </section>
     <OrderAttachments orderId={order.id} canUpload={buyer || supplier || state.actor?.id === order.driverId} />
     <section className="card panel"><PanelTitle title="Order timeline" /><ul className="timeline">{order.timeline.toReversed().map((item, index) => <li key={`${item.at}-${index}`}><Check size={14} /><span>{item.title}</span><time dateTime={item.at}>{dateLabel(item.at)}</time></li>)}</ul></section>
-    {dialog === "fund" && <Dialog title="Reserve demo funds" onClose={() => setDialog(null)}><div className="stack"><p className="notice notice-warn"><Wallet size={17} />Record a simulated reserve of {money(order.totalCents)} for {order.reference}. No wallet transaction will be made.</p><div><button type="button" className="primary" disabled={!!busy} onClick={async () => { if (await run("fundOrder", { orderId: order.id }, "Demo funds reserved.")) setDialog(null); }}>Confirm demo reserve</button></div></div></Dialog>}
+    {dialog === "fund" && <FundingDialog state={state} order={order} busy={busy} run={run} onClose={() => setDialog(null)} />}
     {dialog === "cancel" && <Dialog title="Cancel this order?" onClose={() => setDialog(null)}><div className="stack"><p className="notice notice-warn"><AlertTriangle size={17} />This cancels {order.reference} and returns reserved stock to the supplier.</p><div><button type="button" className="danger" disabled={!!busy} onClick={async () => { if (await run("cancelOrder", { orderId: order.id }, "Order cancelled and stock reservation released.")) setDialog(null); }}>Confirm cancellation</button></div></div></Dialog>}
     {dialog === "accept" && <AcceptanceForm state={state} order={order} busy={busy} run={run} onClose={() => setDialog(null)} onAuthorized={(data) => { setDialog(null); setAuthorization(data); }} />}
     {dialog === "review" && <OrderForm dialog="review" order={order} busy={busy} run={run} onClose={() => setDialog(null)} />}
     {dialog === "dispute" && <OrderForm dialog="dispute" order={order} busy={busy} run={run} onClose={() => setDialog(null)} />}
     {dialog === "driver" && <OrderForm dialog="driver" order={order} busy={busy} run={run} drivers={driverList} onClose={() => setDialog(null)} />}
-    {authorization && <QrDialog authorization={authorization} mode={testnet ? "testnet" : "demo"} onClose={() => setAuthorization(null)} />}
+    {authorization && <QrDialog authorization={authorization} mode={testnet ? "testnet" : "demo"} currency={order.currency} tokenSymbol={state.escrow.mode === "testnet" ? state.escrow.tokenSymbol : undefined} onClose={() => setAuthorization(null)} />}
   </div>;
+}
+
+function FundingDialog({ state, order, busy, run, onClose }: Pick<OrderProps, "state" | "order" | "busy" | "run"> & { onClose: () => void }) {
+  const mode = state.escrow;
+  const testnet = mode.mode === "testnet";
+  const currency = order.currency ?? "ZAR";
+  const goodsSubtotal = order.totalCents - order.taxCents - order.deliveryFeeCents;
+  const pendingFunding = order.transactions.find((transaction) => transaction.kind === "funding" && transaction.status === "pending");
+
+  async function fundDemo() {
+    if (await run("fundOrder", { orderId: order.id }, "Demo funds reserved.")) onClose();
+  }
+
+  return <Dialog title="Review escrow payment" onClose={onClose}>
+    <div className="stack">
+      <div className="payment-checkout-total">
+        <div><span>Reserve in escrow</span><strong>{paymentAmount(order.totalCents, mode.mode, testnet ? mode.tokenSymbol : undefined, currency)}</strong></div>
+        <LockKeyhole aria-hidden="true" size={24} />
+      </div>
+      <div className="payment-checkout-order">
+        <span className="payment-transaction-icon"><PackageCheck size={19} /></span>
+        <div><strong>{order.product}</strong><span>{order.reference} · {companyName(state, order.supplierId)}</span></div>
+      </div>
+      <dl className="payment-breakdown">
+        <div><dt>Goods · {number(order.quantity)} {order.unit}</dt><dd>{money(goodsSubtotal, currency)}</dd></div>
+        <div><dt>Delivery</dt><dd>{money(order.deliveryFeeCents, currency)}</dd></div>
+        <div><dt>Tax</dt><dd>{money(order.taxCents, currency)}</dd></div>
+        <div><dt>Quoted total</dt><dd>{money(order.totalCents, currency)}</dd></div>
+      </dl>
+      <div className="payment-checkout-method">
+        <ShieldCheck size={19} />
+        <div><strong>{testnet ? `${mode.networkName} · ${mode.tokenSymbol}` : "Simulated payment"}</strong><p>Funds are reserved for {companyName(state, order.supplierId)} and released after a confirmed handover.</p></div>
+      </div>
+      {testnet ? <OrderFunding state={state} order={order} busy={busy} run={run} knownHash={pendingFunding?.hash} onFunded={onClose} /> :
+        <button type="button" className="primary payment-confirm" disabled={!!busy} onClick={() => void fundDemo()}><LockKeyhole size={16} />Confirm demo reserve</button>}
+    </div>
+  </Dialog>;
 }
 
 function AcceptanceForm({ state, order, busy, run, onClose, onAuthorized }: { state: MarketplaceState; order: Order; busy: string; run: RunAction; onClose: () => void; onAuthorized: (authorization: DeliveryAuthorization) => void }) {
@@ -122,7 +175,8 @@ function AcceptanceForm({ state, order, busy, run, onClose, onAuthorized }: { st
   }
 
   return <Dialog title="Inspect delivered goods" onClose={onClose}><form className="stack" onSubmit={(event) => void authorize(event)}><p className="small-note">Accept only the goods you checked. The remaining {order.unit} stay outstanding.</p><label className="field">Accepted {order.unit}<input type="number" min="1" max={remaining} required readOnly={existingQuantity != null} value={quantity || ""} onChange={(event) => setQuantity(Number(event.currentTarget.value))} /></label>
-    <div className="notice"><QrCode size={17} /><div><strong>Authorised {testnet ? "testnet release" : "demo release"} {testnet ? `${(amount / 100).toFixed(2)} test tokens` : money(amount)}</strong><p>{testnet ? "The supplier accepts the single-use QR with its linked wallet." : "The supplier or authorised driver must accept the single-use QR to proceed."}</p></div></div>
+    <div className="payment-checkout-total"><div><span>{testnet ? "Testnet release" : "Demo release"}</span><strong>{paymentAmount(amount, testnet ? "testnet" : "demo", state.escrow.mode === "testnet" ? state.escrow.tokenSymbol : undefined, order.currency)}</strong></div><QrCode size={24} /></div>
+    <div className="payment-checkout-method"><LockKeyhole size={17} /><p>{testnet ? "The supplier accepts the single-use QR with its linked wallet." : "The supplier or authorised driver confirms the release with the single-use QR."}</p></div>
     {testnet ? <AuthorizeTestnetDelivery state={state} order={order} quantity={quantity} busy={busy} run={run} onAuthorized={onAuthorized} /> : <div><button type="submit" className="primary" disabled={!canAuthorize}><QrCode size={16} />{existingQuantity != null ? "Show handover QR" : "Authorise & generate QR"}</button></div>}
   </form></Dialog>;
 }
@@ -189,21 +243,107 @@ function OrderAttachments({ orderId, canUpload }: { orderId: string; canUpload: 
 }
 
 function TransactionList({ order }: { order: Order }) {
-  return <div className="small-stack">{order.transactions.toReversed().map((transaction) => <div key={transaction.id} className="subcard small-stack"><div className="split-line"><div><h3>{transaction.kind.charAt(0).toUpperCase() + transaction.kind.slice(1)}</h3><p>{dateLabel(transaction.createdAt)} · {transaction.mode === "demo" ? "Demo simulation" : "Testnet"}</p></div><Tag value={transaction.status} /></div><div className="split-line"><strong>{transaction.mode === "demo" ? money(transaction.amountCents) : `${(transaction.amountCents / 100).toFixed(2)} test tokens`}</strong>{transaction.status === "confirmed" && <button type="button" className="secondary" onClick={() => receipt(order, transaction)}><FileText size={15} />Receipt</button>}</div>{transaction.hash && <p className="transaction-hash">{transaction.hash}</p>}</div>)}</div>;
+  return <ul className="payment-order-activity">
+    {order.transactions.toReversed().map((transaction) => {
+      const kind = transactionKinds[transaction.kind];
+      return <li key={transaction.id}>
+        <div className="payment-order-transaction">
+          <span className="payment-transaction-icon"><kind.icon size={17} /></span>
+          <div className="payment-row-title"><strong>{kind.label}</strong><span>{dateLabel(transaction.createdAt)} · {transaction.mode === "demo" ? "Demo" : "Testnet"}</span></div>
+          <Tag value={transaction.status} />
+          <strong className="payment-row-amount">{paymentAmount(transaction.amountCents, transaction.mode, undefined, order.currency)}</strong>
+          {transaction.status === "confirmed" && <button type="button" className="secondary payment-receipt" onClick={() => receipt(order, transaction)}><FileText size={15} />Receipt</button>}
+        </div>
+        {transaction.hash && <p className="payment-transaction-hash">{transaction.hash}</p>}
+      </li>;
+    })}
+  </ul>;
 }
 
-export function Funds({ state, navigate }: { state: MarketplaceState; navigate: Navigate }) {
-  const total = (name: "fundedCents" | "releasedCents" | "refundedCents") => state.orders.filter((order) => (order.paymentMode ?? "demo") === state.escrow.mode).reduce((sum, order) => sum + order[name], 0);
-  const testnet = state.escrow.mode === "testnet";
-  const format = (value: number) => testnet ? `${(value / 100).toFixed(2)} test tokens` : money(value);
-  const records = state.orders.filter((order) => order.transactions.length);
-  const exportCsv = () => download("stockpact-transactions.csv", csv([["Order", "Type", "Mode", "Status", "Nominal cents", "Quantity", "Transaction hash", "Created"], ...records.flatMap((order) => order.transactions.map((item) => [order.reference, item.kind, item.mode, item.status, item.amountCents, item.quantity, item.hash, item.createdAt]))]), "text/csv;charset=utf-8");
+export function Funds({ state, navigate, busy, run }: Pick<OrderProps, "state" | "navigate" | "busy" | "run">) {
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<OrderTransaction["kind"] | "all">("all");
+  const [fundingId, setFundingId] = useState<string | null>(null);
+  const mode = state.escrow;
+  const testnet = mode.mode === "testnet";
+  const format = (value: number) => paymentAmount(value, mode.mode, testnet ? mode.tokenSymbol : undefined);
+  const balances = state.orders.filter((order) => (order.paymentMode ?? "demo") === mode.mode);
+  const { funded, released, refunded } = balances.reduce((totals, order) => ({
+    funded: totals.funded + order.fundedCents, released: totals.released + order.releasedCents, refunded: totals.refunded + order.refundedCents,
+  }), { funded: 0, released: 0, refunded: 0 });
+  const held = Math.max(0, funded - released - refunded);
+  const records = state.orders.flatMap((order) => order.transactions.map((transaction) => ({ order, transaction })))
+    .sort((first, second) => second.transaction.createdAt.localeCompare(first.transaction.createdAt));
+  const needle = query.trim().toLowerCase();
+  const visible = records.filter(({ order, transaction }) => (filter === "all" || transaction.kind === filter) &&
+    [order.reference, order.product, companyName(state, order.supplierId), companyName(state, order.buyerId),
+      transactionKinds[transaction.kind].label, transaction.status, transaction.hash]
+      .some((value) => value?.toLowerCase().includes(needle)));
+  const canFund = state.actor && ["owner", "approver"].includes(state.actor.role) && (testnet || state.actor.demoRole);
+  const payable = canFund ? state.orders.filter((order) => order.buyerId === state.actor?.companyId && order.status === "awaiting_funding") : [];
+  const checkout = payable.find((order) => order.id === fundingId);
+  const filters = ["all", "funding", "release", "refund"] as const;
+
+  function exportCsv() {
+    download("stockpact-transactions.csv", csv([
+      ["Order", "Type", "Mode", "Status", "Nominal cents", "Quantity", "Transaction hash", "Created"],
+      ...visible.map(({ order, transaction }) => [order.reference, transaction.kind, transaction.mode, transaction.status,
+        transaction.amountCents, transaction.quantity, transaction.hash, transaction.createdAt]),
+    ]), "text/csv;charset=utf-8");
+  }
+
   return <>
-    <ViewTitle title="Funds & transactions" subtitle="Review escrow reserves, releases, refunds and settlement status." action={<button className="secondary" type="button" disabled={!records.length} onClick={exportCsv}><Download size={16} />Export CSV</button>} />
-    <div className="stack">
-      <div className="notice notice-warn"><Wallet size={17} />{testnet ? "Settlement uses the configured testnet token. Rand quote totals are nominal references and do not include wallet network fees." : "Demo funds are simulated. This workspace does not use a wallet or move money."}</div>
-      <div className="fund-metrics">{[["Reserved now", total("fundedCents") - total("releasedCents") - total("refundedCents")], ["Released", total("releasedCents")], ["Refunded", total("refundedCents")]].map(([label, amount]) => <section className="card panel" key={label}><p className="small-note">{label}</p><strong className="listing-price">{format(Number(amount))}</strong></section>)}</div>
-      <section className="card panel stack"><PanelTitle title="Transaction history" />{records.length ? records.map((order) => <article className="subcard stack" key={order.id}><div className="split-line"><div><h3>{order.product}</h3><p>{order.reference}</p></div><button className="secondary" type="button" onClick={() => navigate("orders", order.id)}>Open order</button></div><TransactionList order={order} /></article>) : <Empty title="No transactions yet" detail="Funding, releases and refunds will appear here." icon={Wallet} />}</section>
+    <ViewTitle title="Payments" subtitle="Fund orders, track supplier payouts and find receipts." />
+    <div className="payments-page">
+      <section className="payment-overview" aria-label="Escrow overview">
+        <div className="payment-balance">
+          <div className="payment-balance-header"><span><LockKeyhole size={17} /> In escrow</span><span className="payment-mode">{testnet ? mode.networkName : "Demo payments"}</span></div>
+          <strong className="payment-balance-number">{format(held)}</strong>
+          <p>{testnet ? "Testnet funds held for open orders" : "Simulated rand reserved for open orders"}</p>
+          <div className="payment-balance-track" aria-hidden="true">
+            {funded > 0 && <><span style={{ flexGrow: held }} /><span style={{ flexGrow: released }} /><span style={{ flexGrow: refunded }} /></>}
+          </div>
+        </div>
+        <dl className="payment-totals">
+          <div><dt><ArrowDownToLine size={17} /> Total funded</dt><dd>{format(funded)}</dd></div>
+          <div><dt><ArrowUpRight size={17} /> Released</dt><dd>{format(released)}</dd></div>
+          <div><dt><ArrowDownLeft size={17} /> Refunded</dt><dd>{format(refunded)}</dd></div>
+        </dl>
+      </section>
+      {payable.length > 0 && <section className="card payment-due">
+        <PanelTitle title="Awaiting payment" subtitle="Reserve funds for your approved orders." />
+        {payable.map((order) => <div className="payment-due-row" key={order.id}>
+          <span className="payment-transaction-icon"><PackageCheck size={18} /></span>
+          <div className="payment-row-title"><strong>{order.product}</strong><span>{order.reference} · {companyName(state, order.supplierId)}</span></div>
+          <strong className="payment-row-amount">{format(order.totalCents)}</strong>
+          <button type="button" className="primary" disabled={!!busy} onClick={() => setFundingId(order.id)}>Review payment <ArrowRight size={15} /></button>
+        </div>)}
+      </section>}
+      <section className="card payment-ledger">
+        <div className="payment-ledger-toolbar">
+          <PanelTitle title="Transaction history" />
+          <button className="secondary" type="button" disabled={!visible.length} onClick={exportCsv}><Download size={16} />Export CSV</button>
+        </div>
+        {records.length > 0 && <div className="payment-ledger-filters">
+          <div className="filters" role="group" aria-label="Transaction type">{filters.map((kind) => <button type="button" className="filter" aria-pressed={filter === kind} key={kind} onClick={() => setFilter(kind)}>{kind === "all" ? "All activity" : transactionKinds[kind].filter}</button>)}</div>
+          <label className="search-field"><Search size={15} /><span className="sr-only">Search transactions</span><input type="search" value={query} onChange={(event) => setQuery(event.currentTarget.value)} placeholder="Search transactions" /></label>
+        </div>}
+        {visible.length ? <ul className="payment-ledger-list" aria-label="Transactions">{visible.map(({ order, transaction }) => {
+          const kind = transactionKinds[transaction.kind];
+          return <li className="payment-ledger-row" key={`${order.id}:${transaction.id}`}>
+            <span className="payment-transaction-icon"><kind.icon size={18} /></span>
+            <div className="payment-row-title"><strong>{kind.label}</strong><span>{order.product} · {order.reference}</span></div>
+            <div className="payment-row-meta"><time dateTime={transaction.createdAt}>{dateLabel(transaction.createdAt)}</time><span>{transaction.mode === "demo" ? "Demo" : "Testnet"}</span></div>
+            <Tag value={transaction.status} />
+            <strong className="payment-row-amount">{paymentAmount(transaction.amountCents, transaction.mode, undefined, order.currency)}</strong>
+            <div className="payment-row-actions">
+              {transaction.status === "confirmed" && <button type="button" className="icon-button" aria-label={`Download ${kind.label.toLowerCase()} receipt for ${order.reference}`} title="Download receipt" onClick={() => receipt(order, transaction)}><Download size={16} /></button>}
+              <button type="button" className="icon-button" aria-label={`Open order ${order.reference}`} title="Open order" onClick={() => navigate("orders", order.id)}><ArrowUpRight size={16} /></button>
+            </div>
+          </li>;
+        })}</ul> : <Empty title={records.length ? "No matching transactions" : "No transactions yet"} detail={records.length ? "Try a different search or transaction type." : "Funding, releases and refunds will appear here."} icon={Wallet} />}
+      </section>
     </div>
+    {checkout && <FundingDialog state={state} order={checkout} busy={busy} run={run} onClose={() => setFundingId(null)} />}
   </>;
 }

@@ -18,3 +18,10 @@ Workers AI provides draft extraction and optional speech transcription. The loca
 StockPact uses demo settlement only when explicitly enabled for the demo. In testnet mode, the application binds wallet identity to company membership and records only successful, matching on-chain receipts. The contract applies pro-rata allocation to the accepted quote total with a final rounding reconciliation. The test token is valueless.
 
 Demo users can switch into fictional companies. Disable demo mode for any pilot using real companies. Persona provides optional hosted capture. Reviewers grant company verification after matching approved provider checks to the company record.
+
+## Visual assets
+
+The new photographs were made with built-in ImageGen and optimised for the app.
+
+- [Cape Town loading bay](../public/cape-town-loading-bay.webp) depicts a wholesale loading bay near Epping Industria with Table Mountain in the distance, a worker moving yellow produce crates and cartons, and worn concrete in late-afternoon sunlight. The prompt called for documentary framing, warm industrial colours, and unbranded workwear and stock.
+- The catalogue photos of [chopped tomatoes](../public/listing-tomatoes.webp), [sunflower oil](../public/listing-oil.webp), and [coffee beans](../public/listing-coffee.webp) use a shared prompt for unbranded wholesale stock against a neutral studio backdrop with soft daylight.

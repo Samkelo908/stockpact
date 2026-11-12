@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import { ArrowRight, ArrowUpRight, AudioLines, ClipboardList, FileCheck2, FileText, MapPin, PackageCheck, ScanLine, Search, ShieldCheck, Sparkles, Store, Truck } from "lucide-react";
+import Image from "next/image";
+import { ArrowRight, ArrowUpRight, AudioLines, Banknote, ClipboardList, FileCheck2, FileText, MapPin, PackageCheck, ScanLine, Search, ShieldCheck, Store, Truck } from "lucide-react";
 import type { MarketplaceState, PurchaseRequest, RequestDraft } from "../shared/marketplace";
 import { cents, companyOf, type Navigate, type RunAction } from "./client";
 import { Empty, PanelTitle, Tag, TextButton, ViewTitle, dateLabel, number } from "./ui";
@@ -31,47 +32,61 @@ export function Dashboard({ state, prompt, setPrompt, busy, generate, setDraft, 
   const openOrders = state.orders.filter((order) => !["completed", "cancelled"].includes(order.status));
   const deliveries = openOrders.filter((order) => ["dispatched", "partial"].includes(order.status));
   const metrics = [
-    { label: "Open requests", value: requests.length, icon: ClipboardList, tint: "mint", view: "requests" },
-    { label: "Quotes received", value: quotes.length, icon: FileCheck2, tint: "blue", view: "requests" },
-    { label: "Active orders", value: openOrders.length, icon: PackageCheck, tint: "violet", view: "orders" },
-    { label: "Deliveries in progress", value: deliveries.length, icon: Truck, tint: "amber", view: "deliveries" },
+    { label: "Open requests", value: requests.length, icon: ClipboardList, view: "requests" },
+    { label: "Quotes received", value: quotes.length, icon: FileCheck2, view: "requests" },
+    { label: "Active orders", value: openOrders.length, icon: PackageCheck, view: "orders" },
+    { label: "Deliveries in progress", value: deliveries.length, icon: Truck, view: "deliveries" },
   ] as const;
   const activity = [
     ...state.orders.map((order) => ({ key: order.id, title: order.product, detail: `${order.reference} · ${dateLabel(order.createdAt)}`, status: order.status, date: order.timeline.at(-1)?.at ?? order.createdAt, view: "orders" as const, icon: PackageCheck })),
     ...state.requests.map((request) => ({ key: request.id, title: request.draft.product, detail: `${number(request.draft.quantity)} ${request.draft.unit} · ${dateLabel(request.createdAt)}`, status: request.status, date: request.activity.at(-1)?.at ?? request.createdAt, view: "requests" as const, icon: FileText })),
   ].sort((first, second) => second.date.localeCompare(first.date)).slice(0, 4);
   const pendingApproval = state.orders.filter((order) => order.status === "approval").length;
+  const readyToFund = state.orders.filter((order) => order.buyerId === company?.id && order.status === "awaiting_funding").length;
   const disputes = state.disputes.filter((dispute) => dispute.status === "open").length;
   const lowStock = state.listings.filter((listing) => listing.supplierId === state.actor?.companyId && !listing.archived && listing.available <= listing.minimum).length;
   const quickActions = [
     ...(role === "reviewer" ? [{ title: "Platform administration", detail: "Review verification checks and disputes", tint: "blue", icon: ShieldCheck, action: () => navigate("admin") }] : []),
-    ...(!["reviewer", "driver"].includes(role ?? "") ? [{ title: "Browse marketplace", detail: "Find products and suppliers near you", tint: "mint", icon: Store, action: () => navigate("marketplace") }] : []),
+    ...(!["reviewer", "driver"].includes(role ?? "") ? [
+      { title: "Payments", detail: readyToFund ? readyToFund + (readyToFund === 1 ? " order ready to fund" : " orders ready to fund") : "View order funds and receipts", tint: "mint", icon: Banknote, action: () => navigate("funds") },
+      { title: "Browse marketplace", detail: "Find stock from South African suppliers", tint: "amber", icon: Store, action: () => navigate("marketplace") },
+    ] : []),
     ...(role === "driver" || role === "sales" || company?.capabilities.includes("supplier") ? [{ title: "Scan delivery QR", detail: "Review a handover and its payment", tint: "blue", icon: ScanLine, action: () => navigate("deliveries", "scan") }] : [{ title: "Track deliveries", detail: "See when goods are ready to inspect", tint: "blue", icon: Truck, action: () => navigate(role === "reviewer" ? "orders" : "deliveries") }]),
     { title: "Company verification", detail: "Review your business and delivery status", tint: "violet", icon: ShieldCheck, action: () => navigate("settings") },
   ];
 
-  return <>
-    <ViewTitle title="Procurement overview" subtitle={company ? `Manage sourcing and orders for ${company.name}.` : "Manage sourcing, quotes and orders."} action={<span className="location"><MapPin size={14} />{company?.location || "Cape Town"}, {company?.country || "ZA"}</span>} />
-    {canBuy && <section className="hero" aria-labelledby="purchase-heading">
-      <div className="hero-content">
-        <div className="hero-eyebrow"><Sparkles size={13} /> AI purchasing</div>
-        <h2 id="purchase-heading">What does your<br className="hero-break" /> business need?</h2>
-        <p>Describe what you need and build a request for local suppliers.</p>
-        <form className="hero-form" onSubmit={(event) => { event.preventDefault(); void generate(); }}>
+  return <div className="dashboard-home">
+    <ViewTitle title="Procurement overview" subtitle={company ? `Manage sourcing and orders for ${company.name}.` : "Manage sourcing, quotes and orders."} action={<span className="home-location"><MapPin size={15} aria-hidden="true" />{company?.location || "South Africa"}</span>} />
+    {canBuy && <section className="sourcing-hero" aria-labelledby="purchase-heading">
+      <div className="sourcing-hero-copy">
+        <h2 id="purchase-heading">What does your business need?</h2>
+        <p>Tell us what stock you need. Review your request before sending it to suppliers.</p>
+        <form className="sourcing-form" onSubmit={(event) => { event.preventDefault(); void generate(); }}>
           <label className="sr-only" htmlFor="home-request">Describe your requirement</label>
-          <input id="home-request" value={prompt} onChange={(event) => setPrompt(event.currentTarget.value)} placeholder="20 cases of water" maxLength={2000} required />
+          <input id="home-request" value={prompt} onChange={(event) => setPrompt(event.currentTarget.value)} placeholder="e.g. 20 cases of water" maxLength={2000} required />
           <Voice onTranscript={setPrompt} disabled={!!busy} preferCloudflare={state.aiMode === "cloudflare"} />
           <button className="primary" type="submit" disabled={!!busy} aria-label="Build request"><span>Build request</span><ArrowRight size={16} /></button>
         </form>
-        <div className="hero-shortcuts">
-          <button type="button" onClick={() => { setPrompt("I need 20 cases of 500 ml still water delivered to Cape Town."); document.getElementById("home-request")?.focus(); }}>Try still water</button>
-          <button type="button" onClick={() => { setPrompt("I need food-safe takeaway packaging delivered to Cape Town."); document.getElementById("home-request")?.focus(); }}>Try packaging</button>
-          <button type="button" onClick={() => { setDraft(freshDraft(company?.location)); navigate("assistant"); }}><ClipboardList size={13} /> Guided form</button>
+        <div className="sourcing-helpers">
+          <button type="button" onClick={() => { setDraft(freshDraft(company?.location)); navigate("assistant"); }}><ClipboardList size={15} />Use the order form</button>
+          <button type="button" onClick={() => { setPrompt("I need 20 cases of 500 ml still water delivered to Cape Town."); document.getElementById("home-request")?.focus(); }}>Try an example</button>
         </div>
       </div>
+      <figure className="sourcing-photo">
+        <Image src="/cape-town-loading-bay.webp" alt="A Cape Town loading bay with Table Mountain in the distance" fill unoptimized preload />
+        <figcaption><MapPin size={13} aria-hidden="true" />Cape Town, South Africa</figcaption>
+      </figure>
     </section>}
-    <section className="metrics" aria-label="Workspace totals">{metrics.filter(({ view }) => role === "reviewer" ? view === "orders" : role === "driver" ? ["orders", "deliveries"].includes(view) : true).map(({ label, value, icon: Icon, tint, view }) => <button type="button" className="metric" key={label} onClick={() => navigate(view)}><span className={`icon-tile ${tint}`}><Icon size={17} /></span><ArrowUpRight className="metric-arrow" size={15} /><strong>{number(value)}</strong><span className="metric-label">{label}</span></button>)}</section>
-    <div className="dashboard-grid">
+    <section className="overview-totals" aria-label="Workspace totals">
+      {metrics.filter(({ view }) => role === "reviewer" ? view === "orders" : role === "driver" ? ["orders", "deliveries"].includes(view) : true).map(({ label, value, icon: Icon, view }) =>
+        <button type="button" className="overview-total" key={label} onClick={() => navigate(view)}>
+          <Icon className="overview-total-icon" size={19} aria-hidden="true" />
+          <ArrowUpRight className="overview-total-arrow" size={16} aria-hidden="true" />
+          <strong>{number(value)}</strong>
+          <span>{label}</span>
+        </button>)}
+    </section>
+    <div className="dashboard-grid dashboard-work">
       <section className="card panel">
         <PanelTitle title="Recent activity" subtitle="Latest requests and order updates" action={<TextButton onClick={() => navigate("orders")}>View orders</TextButton>} />
         {activity.length ? activity.map(({ key, title, detail, status, view, icon: Icon }) => <button key={key} type="button" className="activity-row" onClick={() => navigate(view, key)}><span className="icon-tile mint"><Icon size={16} /></span><div><strong>{title}</strong><p>{detail}</p></div><Tag value={status} /><ArrowUpRight size={15} /></button>) : <Empty title="Your activity will appear here" detail="Create a purchasing request or open the marketplace to get started." />}
@@ -86,7 +101,7 @@ export function Dashboard({ state, prompt, setPrompt, busy, generate, setDraft, 
         </div>}
       </section>
     </div>
-  </>;
+  </div>;
 }
 
 export function SearchProgress({ title, detail }: { title: string; detail: string }) {
@@ -137,7 +152,7 @@ export function Assistant({ state, prompt, setPrompt, draft, setDraft, busy, gen
   }
 
   return <>
-    <ViewTitle title="AI purchasing workspace" subtitle="Turn a voice or text requirement into a request you can review." action={<Tag value={state.aiMode === "cloudflare" ? "Cloudflare AI" : "Demo assistant"} variant={state.aiMode === "cloudflare" ? "green" : "amber"} />} />
+    <ViewTitle title="Source stock" subtitle="Type, speak or enter the details of your purchase request." action={<Tag value={state.aiMode === "cloudflare" ? "Cloudflare AI" : "Demo assistant"} variant={state.aiMode === "cloudflare" ? "green" : "amber"} />} />
     <div className="workspace-grid">
       <section className="card panel stack">
         <PanelTitle title="Purchasing assistant" subtitle="What does your business need?" />
@@ -145,7 +160,7 @@ export function Assistant({ state, prompt, setPrompt, draft, setDraft, busy, gen
         {busy === "draftRequest" && <SearchProgress title="Preparing your request" detail="Reading your requirement and checking the details to review." />}
         <form className="small-stack" onSubmit={onPrompt}>
           <label className="field">Describe the goods you need<textarea className="composer-text" value={prompt} onChange={(event) => setPrompt(event.currentTarget.value)} maxLength={2000} placeholder="I need 20 cases of 500 ml still water delivered to Cape Town." required /></label>
-          <div className="button-row"><Voice onTranscript={setPrompt} disabled={!!busy} preferCloudflare={state.aiMode === "cloudflare"} /><button className="primary" type="submit" disabled={!!busy}><Sparkles size={16} />Build request</button></div>
+          <div className="button-row"><Voice onTranscript={setPrompt} disabled={!!busy} preferCloudflare={state.aiMode === "cloudflare"} /><button className="primary" type="submit" disabled={!!busy}>Build request<ArrowRight size={16} /></button></div>
         </form>
         <button className="secondary" type="button" onClick={() => setDraft(freshDraft(company?.location))} disabled={!!busy}><ClipboardList size={16} />Use guided form</button>
       </section>

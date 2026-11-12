@@ -136,18 +136,23 @@ function TestnetTransaction({ config, scope, busy, label, detail, knownHash, sub
   </div>;
 }
 
-export function OrderFunding({ state, order, run, busy }: ControlProps & { order: Order }) {
+export function OrderFunding({ state, order, run, busy, knownHash, onFunded }: ControlProps & { order: Order; knownHash?: Hex; onFunded?: () => void }) {
   const config = state.escrow;
   if (config.mode !== 'testnet') return null;
   const chain = config;
   return <TestnetTransaction key={order.id} config={chain} scope={`fund-${order.id}`} busy={busy}
     label={`Fund ${paymentLabel(chain, order.totalCents)}`}
     detail={`Reserve ${paymentLabel(chain, order.totalCents)} on ${chain.networkName}. Your wallet shows the test gas fee.`}
+    knownHash={knownHash}
     submit={async () => {
       const prepared = await run<FundingTerms>('prepareFunding', { orderId: order.id });
       if (prepared?.data) return fundEscrow(chain, prepared.data);
     }}
-    verify={async (hash) => Boolean(await run('fundOrder', { orderId: order.id, transactionHash: hash }, 'Testnet funding confirmed.'))} />;
+    verify={async (hash) => {
+      const result = await run('fundOrder', { orderId: order.id, transactionHash: hash }, 'Testnet funding confirmed.');
+      if (result) onFunded?.();
+      return Boolean(result);
+    }} />;
 }
 
 export function AuthorizeTestnetDelivery({ state, order, quantity, run, busy, onAuthorized }: ControlProps & {
