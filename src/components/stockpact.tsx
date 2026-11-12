@@ -183,7 +183,7 @@ export function StockPact() {
         {current && <>{route.view === "home" && <Dashboard {...composer} />}
         {route.view === "assistant" && <Assistant {...composer} run={run} />}
         {route.view === "marketplace" && <Marketplace {...common} query={marketQuery} setQuery={setMarketQuery} startDraft={startDraft} />}
-        {route.view === "requests" && <Requests {...common} />}
+        {route.view === "requests" && <Requests {...common} startDraft={startDraft} />}
         {route.view === "orders" && <Orders {...common} startDraft={startDraft} />}
         {route.view === "inventory" && <Inventory {...common} />}
         {route.view === "deliveries" && <Deliveries {...common} />}

@@ -165,7 +165,7 @@ test("fits a phone, supports keyboard focus and shows search progress while wait
   await page.getByLabel("Required by").fill(delivery);
   await expect(requiredDateHint).toHaveCount(0);
   const motion = page.waitForFunction(() => {
-    const status = document.querySelector('[role="status"][data-state="complete"]');
+    const status = document.querySelector('.search-progress[data-state="complete"]');
     if (!status?.textContent?.includes("Supplier search complete")) return false;
     const track = status.querySelector(".search-progress-track");
     return track?.getAnimations({ subtree: true }).some((animation) => animation.playState === "running");
@@ -173,8 +173,20 @@ test("fits a phone, supports keyboard focus and shows search progress while wait
   await page.getByRole("button", { name: "Find suppliers" }).click();
   await motion;
   await expect(page.getByRole("status").filter({ hasText: "Supplier search complete" })).toBeInViewport();
-  await expect(page.getByRole("heading", { name: "Matching suppliers" })).toBeVisible();
+  await page.getByRole("button", { name: "Review suppliers" }).click();
+  await expect(page.getByRole("region", { name: "Matching suppliers" })).toBeFocused();
+  await expect(page.getByRole("heading", { name: "Matching suppliers" })).toBeInViewport();
   await expect(page.getByRole("status").filter({ hasText: "Finding matching suppliers" })).toHaveCount(0);
+
+  await page.getByRole("button", { name: "New request" }).click();
+  await page.getByRole("button", { name: "Use guided form" }).click();
+  await page.getByLabel("Product and specification").fill("Acoustic booth cushions");
+  await page.getByLabel("Required by").fill(delivery);
+  await page.getByRole("button", { name: "Find suppliers" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "No suppliers matched this request" })).toBeInViewport();
+  await page.getByRole("button", { name: "Adjust and search again" }).click();
+  await expect(page.getByLabel("Product and specification")).toHaveValue("Acoustic booth cushions");
+  await expect(page.getByLabel("Required by")).toHaveValue(delivery);
 });
 
 test("reviews and reserves a payment from the phone, then finds and downloads the receipt", async ({ page }, testInfo) => {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
 import Image from "next/image";
 import { ArrowRight, ArrowUpRight, AudioLines, Banknote, Check, ClipboardList, FileCheck2, FileText, LoaderCircle, MapPin, PackageCheck, ScanLine, Search, ShieldCheck, Store, Truck } from "lucide-react";
 import type { MarketplaceState, PurchaseRequest, RequestDraft } from "../shared/marketplace";
@@ -104,13 +104,14 @@ export function Dashboard({ state, prompt, setPrompt, busy, generate, setDraft, 
   </div>;
 }
 
-export function SearchProgress({ title, detail, complete = false }: { title: string; detail: string; complete?: boolean }) {
-  return <div className="search-progress" data-state={complete ? "complete" : "pending"} role="status" aria-atomic="true">
-    <div className="progress-heading">
+export function SearchProgress({ title, detail, complete = false, action }: { title: string; detail: string; complete?: boolean; action?: ReactNode }) {
+  return <div className="search-progress" data-state={complete ? "complete" : "pending"}>
+    <div className="progress-heading" role="status" aria-atomic="true">
       <div className="radar" aria-hidden="true">{complete ? <Check size={20} /> : <Search size={20} />}</div>
       <div><strong>{title}</strong><p>{detail}</p></div>
     </div>
     <div className="search-progress-track" aria-hidden="true" />
+    {action && <div className="search-progress-action">{action}</div>}
   </div>;
 }
 
