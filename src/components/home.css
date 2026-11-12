@@ -153,7 +153,7 @@
 .sourcing-photo img {
   z-index: -2;
   object-fit: cover;
-  object-position: 66% 54%;
+  object-position: 50% 35%;
 }
 
 .sourcing-photo::before {
@@ -295,11 +295,9 @@
   }
 
   .sourcing-photo {
-    min-height: clamp(133px, 38vw, 200px);
-  }
-
-  .sourcing-photo img {
-    object-position: 64% 47%;
+    grid-row: 1;
+    min-height: 0;
+    aspect-ratio: 2 / 1;
   }
 
   .sourcing-photo figcaption {

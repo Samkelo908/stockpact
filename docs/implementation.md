@@ -23,5 +23,5 @@ Demo users can switch into fictional companies. Disable demo mode for any pilot 
 
 The new photographs were made with built-in ImageGen and optimised for the app.
 
-- [Cape Town loading bay](../public/cape-town-loading-bay.webp) depicts a wholesale loading bay near Epping Industria with Table Mountain in the distance, a worker moving yellow produce crates and cartons, and worn concrete in late-afternoon sunlight. The prompt called for documentary framing, warm industrial colours, and unbranded workwear and stock.
+- [Cape Town shop delivery](../public/cape-town-shop-delivery.webp) shows a woman shop owner checking a delivery on her phone as a supplier brings in a box of stock. The prompt called for a documentary photograph of an independent Cape Town grocery shop, a golden apron, ordinary grocery shelves, and both people, the phone, and the carton visible in a wide crop.
 - The catalogue photos of [chopped tomatoes](../public/listing-tomatoes.webp), [sunflower oil](../public/listing-oil.webp), and [coffee beans](../public/listing-coffee.webp) use a shared prompt for unbranded wholesale stock against a neutral studio backdrop with soft daylight.
