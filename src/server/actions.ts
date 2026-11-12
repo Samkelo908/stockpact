@@ -10,21 +10,21 @@ import * as orders from './orders';
 import * as procurement from './procurement';
 import * as reputation from './reputation';
 import { now, resetDemo } from './seed';
-import { actorForUser, attachCompany, clearSession, demoActor, getActor, getAuth, selectCompany } from './session';
+import { actorForUser, applyRegistrationCookies, clearSession, demoActor, getActor, getAuth, registerCompanyAccount, selectCompany } from './session';
 import * as settings from './settings';
 
 const email = z.email().transform((value) => value.toLowerCase());
 const password = z.string().min(10).max(128);
 const field = (input: unknown, key: string) => parse(z.object({ [key]: id }), input)[key];
 
-async function authActions(action: string, input: unknown): Promise<{ actor: Actor | null } | { data: unknown } | undefined> {
+async function authActions(action: string, input: unknown): Promise<{ actor?: Actor | null; data?: unknown } | undefined> {
   switch (action) {
     case 'register': {
       const { name, companyName, email: address, password: phrase } = parse(z.object({ name: z.string().trim().min(2).max(100),
         companyName: z.string().trim().min(2).max(150), email, password }), input);
-      const result = await (await getAuth()).api.signUpEmail({ body: { name, email: address, password: phrase }, headers: await headers() });
-      await attachCompany(result.user.id, companyName, address);
-      return { actor: await actorForUser(result.user) };
+      const { actor, sessionHeaders } = await registerCompanyAccount({ name, email: address, password: phrase, companyName }, await headers());
+      await applyRegistrationCookies(sessionHeaders);
+      return { actor };
     }
     case 'signIn': {
       const body = parse(z.object({ email, password }), input);
@@ -50,7 +50,8 @@ async function authActions(action: string, input: unknown): Promise<{ actor: Act
     case 'resetPassword': {
       const { token, password: newPassword } = parse(z.object({ token: z.string().min(5).max(200), password }), input);
       await (await getAuth()).api.resetPassword({ body: { token, newPassword }, headers: await headers() });
-      return { data: { message: 'Password changed. Sign in with your new password.' } };
+      await clearSession();
+      return { actor: null, data: { message: 'Password changed. Sign in with your new password.' } };
     }
   }
 }
@@ -122,7 +123,7 @@ export async function marketplaceAction(action: string, input: unknown): Promise
       case 'inspectDelivery': return orders.inspectDelivery(db, actor, input);
       case 'signDelivery': return orders.signDelivery(db, actor, input);
       case 'redeemDelivery': return orders.redeemDelivery(db, actor, input);
-      case 'cancelDelivery': return orders.cancelDelivery(db, actor, field(input, 'orderId'));
+      case 'cancelDelivery': return orders.cancelDelivery(db, actor, input);
       case 'cancelOrder': return orders.cancelOrder(db, actor, field(input, 'orderId'));
       case 'reviewOrder': return orders.reviewOrder(db, actor, input);
       case 'replyReview': return reputation.replyReview(db, actor, input);

@@ -5,10 +5,10 @@ import { test } from 'node:test';
 import { createPublicClient, createWalletClient, custom, defineChain, type Hex } from 'viem';
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
 import { compileContracts } from '../contracts/compile.mjs';
-import { fundEscrow, releaseEscrow, signRelease, signWalletProof } from '../src/integrations/escrow/browser';
+import { fundEscrow, releaseEscrow, revokeEscrowAuthorization, signRelease, signWalletProof } from '../src/integrations/escrow/browser';
 import { escrowStatus } from '../src/integrations/escrow/server';
 import { getDb, mutate, record, tables } from '../src/server/db';
-import { authorizeDelivery, dispatchOrder, fundOrder, inspectDelivery, prepareFunding, redeemDelivery, signDelivery } from '../src/server/orders';
+import { authorizeDelivery, cancelDelivery, dispatchOrder, fundOrder, inspectDelivery, prepareFunding, redeemDelivery, signDelivery } from '../src/server/orders';
 import { acceptQuote } from '../src/server/procurement';
 import { demoAccounts, ensureDemoSeed } from '../src/server/seed';
 import { setWallet, walletChallenge } from '../src/server/settings';
@@ -120,18 +120,26 @@ test('testnet wallet and database recover funding and a partial release from the
   await mutate((db) => fundOrder(db, buyer, { orderId: order.id, transactionHash: fundingHash }));
   await mutate((db) => dispatchOrder(db, supplier, order.id));
 
-  async function submitDelivery(quantity: number) {
+  async function signDeliveryCode(quantity: number) {
     selectedWallet = buyerWallet.address;
     const staged = await mutate((db) => authorizeDelivery(db, buyer, { orderId: order.id, quantity }));
     assert.ok(staged.authorization);
+    assert.equal(staged.platformSignature, undefined);
     const signature = await signRelease(liveConfig, { authorization: staged.authorization, buyerWallet: buyerWallet.address });
-    await mutate((db) => signDelivery(db, buyer, { token: staged.token, signature }));
+    const approved = await mutate((db) => signDelivery(db, buyer, { token: staged.token, signature }));
+    assert.equal(approved.platformSignature, undefined);
     const inspected = await mutate((db) => inspectDelivery(db, supplier, { token: staged.token }));
     assert.ok(inspected.authorization && inspected.buyerSignature && inspected.platformSignature);
+    return { token: staged.token, authorization: inspected.authorization, buyerSignature: inspected.buyerSignature,
+      platformSignature: inspected.platformSignature };
+  }
+
+  async function submitDelivery(quantity: number) {
+    const inspected = await signDeliveryCode(quantity);
     selectedWallet = supplierWallet.address;
     const hash = await releaseEscrow(liveConfig, { authorization: inspected.authorization, buyerSignature: inspected.buyerSignature,
       platformSignature: inspected.platformSignature, supplierWallet: supplierWallet.address });
-    return { token: staged.token, transactionHash: hash };
+    return { token: inspected.token, transactionHash: hash };
   }
 
   const first = await submitDelivery(12);
@@ -144,6 +152,12 @@ test('testnet wallet and database recover funding and a partial release from the
   assert.equal(waiting?.transactions.at(-1)?.status, 'pending');
   assert.equal((await mutate((db) => inspectDelivery(db, supplier, { token: first.token }))).transactionHash, first.transactionHash);
 
+  let shiftedClock = Date.now() + 360_000;
+  t.mock.method(Date, 'now', () => shiftedClock);
+  await provider.request({ method: 'evm_increaseTime', params: [360] });
+  await provider.request({ method: 'evm_mine', params: [] });
+  await assert.rejects(mutate((db) => authorizeDelivery(db, buyer, { orderId: order.id, quantity: 8 })), /already advanced on chain/);
+
   hiddenReceipts.delete(first.transactionHash);
   await mutate((db) => redeemDelivery(db, supplier, first));
   const partial = await record<Order>(await getDb(), tables.orders, order.id);
@@ -151,11 +165,34 @@ test('testnet wallet and database recover funding and a partial release from the
   assert.equal(partial?.transactions.filter(({ hash }) => hash === first.transactionHash).length, 1);
   await assert.rejects(mutate((db) => redeemDelivery(db, supplier, { token: first.token })), /already been used/);
 
+  const revocable = await signDeliveryCode(8);
+  const current = await mutate((db) => authorizeDelivery(db, buyer, { orderId: order.id, quantity: 8, existingOnly: true }));
+  assert.equal(current.token, revocable.token);
+  assert.ok('requiresOnChainProof' in current && current.requiresOnChainProof);
+  await assert.rejects(mutate((db) => cancelDelivery(db, buyer, { orderId: order.id, token: revocable.token })), /expire on chain/);
+  selectedWallet = buyerWallet.address;
+  await revokeEscrowAuthorization(liveConfig, { authorization: revocable.authorization, buyerWallet: buyerWallet.address });
+  await mutate((db) => cancelDelivery(db, buyer, { orderId: order.id, token: revocable.token }));
+  await assert.rejects(mutate((db) => inspectDelivery(db, supplier, { token: revocable.token })), /code was cancelled/);
+
+  const abandoned = await signDeliveryCode(8);
+  const droppedHash = `0x${'12'.repeat(32)}` as const;
+  hiddenReceipts.add(droppedHash);
+  const dropped = await mutate((db) => redeemDelivery(db, supplier, { token: abandoned.token, transactionHash: droppedHash }));
+  assert.ok('paymentStatus' in dropped && dropped.paymentStatus === 409);
+  shiftedClock += 360_000;
+  await assert.rejects(mutate((db) => authorizeDelivery(db, buyer, { orderId: order.id, quantity: 8 })), /expire on chain/);
+  await provider.request({ method: 'evm_increaseTime', params: [360] });
+  await provider.request({ method: 'evm_mine', params: [] });
+
   const final = await submitDelivery(8);
+  assert.notEqual(final.token, abandoned.token);
+  await assert.rejects(mutate((db) => inspectDelivery(db, supplier, { token: abandoned.token })), /code has expired/);
   await mutate((db) => redeemDelivery(db, supplier, final));
   const complete = await record<Order>(await getDb(), tables.orders, order.id);
   assert.equal(complete?.status, 'completed');
   assert.equal(complete.acceptedQuantity, 20);
   assert.equal(complete.releasedCents, order.totalCents);
   assert.equal(complete.transactions.filter(({ status }) => status === 'confirmed').length, 3);
+  assert.equal(complete.transactions.find(({ hash }) => hash === droppedHash)?.status, 'failed');
 });

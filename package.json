@@ -16,7 +16,8 @@
     "contract:build": "node contracts/compile.mjs",
     "contract:test": "node --test contracts/escrow.test.mjs",
     "contract:deploy": "node --env-file-if-exists=.env.local contracts/deploy.mjs",
-    "demo:reset": "node --env-file-if-exists=.env.local --import tsx db/reset-demo.ts"
+    "demo:reset": "node --env-file-if-exists=.env.local --import tsx db/reset-demo.ts",
+    "reviewer:grant": "node --env-file-if-exists=.env.local --import tsx db/grant-reviewer.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "0.5.16",

@@ -179,7 +179,7 @@ export function Assistant({ state, prompt, setPrompt, draft, setDraft, busy, gen
   }
 
   return <>
-    <ViewTitle title="Source stock" subtitle="Type, speak or enter the details of your purchase request." action={<Tag value={state.aiMode === "cloudflare" ? "Cloudflare AI" : "Demo assistant"} variant={state.aiMode === "cloudflare" ? "green" : "amber"} />} />
+    <ViewTitle title="Source stock" subtitle="Type, speak or enter the details of your purchase request." action={<Tag value={state.aiMode === "cloudflare" ? "Cloudflare AI" : state.demo ? "Demo assistant" : "Basic drafting"} variant={state.aiMode === "cloudflare" ? "green" : "amber"} />} />
     {feedback && <SearchProgress {...feedback} />}
     <div className="workspace-grid">
       <section className="card panel stack">

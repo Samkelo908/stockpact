@@ -1,16 +1,16 @@
 'use client';
 
 import { useState } from 'react';
-import { CircleAlert, ExternalLink, QrCode, Wallet } from 'lucide-react';
+import { CircleAlert, ExternalLink, QrCode, RotateCw, Wallet } from 'lucide-react';
 import { formatUnits, type Hex } from 'viem';
 import type { RunAction } from '../../components/client';
 import { Busy, PanelTitle } from '../../components/ui';
 import type { DeliveryAuthorization, MarketplaceState, Order } from '../../shared/marketplace';
-import { connectWallet, fundEscrow, releaseEscrow, signRelease, signWalletProof } from './browser';
+import { connectWallet, fundEscrow, releaseEscrow, revokeEscrowAuthorization, signRelease, signWalletProof } from './browser';
 import { deliveryAmountCents, toTokenUnits, type EscrowAuthorization, type EscrowConfiguration, type FundingTerms, type WalletProof } from './shared';
 
 type ControlProps = { state: MarketplaceState; run: RunAction; busy: string | boolean };
-type DraftRelease = DeliveryAuthorization & { authorization: EscrowAuthorization; platformSignature: Hex; buyerWallet: string };
+type DraftRelease = DeliveryAuthorization & { authorization: EscrowAuthorization; buyerWallet: string };
 
 export type TestnetDeliveryInspection = DeliveryAuthorization & {
   authorization?: EscrowAuthorization;
@@ -184,6 +184,31 @@ export function AuthorizeTestnetDelivery({ state, order, quantity, run, busy, on
     {valid && <p className="small-note">Authorize {paymentLabel(chain, deliveryAmountCents(order.totalCents, order.quantity, order.acceptedQuantity, quantity))} on {chain.networkName}.</p>}
     <div className="button-row"><button type="button" className="primary" disabled={!valid || !!busy || task.working} onClick={() => void task.execute(authorize)}><QrCode size={16} />Sign and generate QR</button></div>
     {task.working && <Busy label="Waiting for buyer signature" />}
+    <ErrorNotice error={task.error} />
+  </div>;
+}
+
+export function RevokeTestnetDelivery({ state, order, run, busy }: ControlProps & { order: Order }) {
+  const task = useWalletTask();
+  const config = state.escrow;
+  const active = order.activeAuthorization;
+  if (config.mode !== 'testnet' || !active) return null;
+  const chain = config;
+  const quantity = active.quantity;
+
+  async function revoke() {
+    const prepared = await run<DraftRelease & { requiresOnChainProof: boolean }>('authorizeDelivery', {
+      orderId: order.id, quantity, existingOnly: true,
+    });
+    if (!prepared?.data) return;
+    const { authorization, buyerWallet, requiresOnChainProof, token } = prepared.data;
+    if (requiresOnChainProof) await revokeEscrowAuthorization(chain, { authorization, buyerWallet });
+    await run('cancelDelivery', { orderId: order.id, token }, 'Handover authorisation cancelled.');
+  }
+
+  return <div className="small-stack">
+    <button type="button" className="secondary" disabled={!!busy || task.working} onClick={() => void task.execute(revoke)}><RotateCw size={16} />Cancel current QR</button>
+    {task.working && <Busy label="Checking wallet revocation" />}
     <ErrorNotice error={task.error} />
   </div>;
 }

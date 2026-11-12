@@ -4,7 +4,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { AlertCircle, AlertTriangle, ArrowDownLeft, ArrowDownToLine, ArrowRight, ArrowUpRight, Check, ClipboardCheck, Download, FileText, LockKeyhole, PackageCheck, Paperclip, QrCode, RotateCw, Search, Send, ShieldCheck, Star, Truck, Wallet } from "lucide-react";
 import type { DeliveryAuthorization, MarketplaceState, Order, OrderTransaction, RequestDraft } from "../shared/marketplace";
 import { deliveryAmountCents } from "../integrations/escrow/shared";
-import { AuthorizeTestnetDelivery, OrderFunding } from "../integrations/escrow/controls";
+import { AuthorizeTestnetDelivery, OrderFunding, RevokeTestnetDelivery } from "../integrations/escrow/controls";
 import { companyName, csv, download, type Navigate, type RunAction } from "./client";
 import { QrDialog } from "./delivery-qr";
 import { Busy, Dialog, Empty, PanelTitle, Tag, ViewTitle, dateLabel, money, number } from "./ui";
@@ -89,12 +89,13 @@ function OrderDetail({ state, order, busy, run, navigate, startDraft }: OrderPro
       {order.activeAuthorization && <div className="notice"><QrCode size={17} /><div><strong>{order.activeAuthorization.quantity} {order.unit} authorised</strong><p>{testnet ? "The supplier can accept with its linked wallet before the QR expires." : "The supplier or authorised driver can accept the handover before the QR expires."}</p></div></div>}
       <div className="button-row">
         {canPay && order.status === "approval" && <button type="button" className="primary" disabled={!!busy} onClick={() => void run("approveOrder", { orderId: order.id }, "Purchase approved.")}><ClipboardCheck size={16} />Approve purchase</button>}
-        {canPay && order.status === "awaiting_funding" && (testnet || state.actor?.demoRole ? <button type="button" className="primary" disabled={!!busy} onClick={() => setDialog("fund")}><Wallet size={16} />{testnet ? "Review payment" : "Reserve demo funds"}</button> : <div className="notice notice-warn"><Wallet size={16} />Testnet funding is unavailable for this company.</div>)}
+        {canPay && order.status === "awaiting_funding" && (testnet || (state.escrow.mode === "demo" && state.actor?.demoRole) ? <button type="button" className="primary" disabled={!!busy} onClick={() => setDialog("fund")}><Wallet size={16} />{testnet ? "Review payment" : "Reserve demo funds"}</button> : <div className="notice notice-warn"><Wallet size={16} />Testnet funding is unavailable for this company.</div>)}
         {canPay && ["approval", "awaiting_funding"].includes(order.status) && !order.transactions.some((item) => item.status === "pending") && <button type="button" className="secondary" disabled={!!busy} onClick={() => setDialog("cancel")}>Cancel order</button>}
         {sales && order.status === "funded" && <button type="button" className="primary" disabled={!!busy} onClick={() => void run("dispatchOrder", { orderId: order.id }, "Order marked dispatched.")}><Truck size={16} />Dispatch goods</button>}
         {sales && !testnet && ["funded", "dispatched", "partial"].includes(order.status) && driverList.length > 0 && <button type="button" className="secondary" disabled={!!busy} onClick={() => setDialog("driver")}><Truck size={16} />{order.driverId ? "Change driver" : "Assign driver"}</button>}
         {canInspect && !order.activeAuthorization && outstanding > 0 && <button type="button" className="primary" disabled={!!busy} onClick={() => setDialog("accept")}><QrCode size={16} />Inspect goods & generate QR</button>}
         {canInspect && activeAuthorization && <button type="button" className="primary" disabled={!!busy} onClick={() => setDialog("accept")}><QrCode size={16} />Reopen handover QR</button>}
+        {canInspect && activeAuthorization && testnet && <RevokeTestnetDelivery state={state} order={order} run={run} busy={busy} />}
         {canInspect && order.activeAuthorization && !testnet && <button type="button" className="secondary" disabled={!!busy} onClick={() => void run("cancelDelivery", { orderId: order.id }, "Handover authorisation cancelled.")}><RotateCw size={16} />Cancel current QR</button>}
         {!buyer && (sales || state.actor?.id === order.driverId) && ["dispatched", "partial"].includes(order.status) && <button type="button" className="primary" onClick={() => navigate("deliveries", "scan")}><QrCode size={16} />Scan handover QR</button>}
         {purchasing && order.status === "completed" && !order.reviewId && <button type="button" className="primary" disabled={!!busy} onClick={() => setDialog("review")}><Star size={16} />Leave review</button>}
@@ -122,6 +123,7 @@ function OrderDetail({ state, order, busy, run, navigate, startDraft }: OrderPro
 
 function FundingDialog({ state, order, busy, run, onClose }: Pick<OrderProps, "state" | "order" | "busy" | "run"> & { onClose: () => void }) {
   const mode = state.escrow;
+  if (mode.mode === "disabled") return null;
   const testnet = mode.mode === "testnet";
   const currency = order.currency ?? "ZAR";
   const goodsSubtotal = order.totalCents - order.taxCents - order.deliveryFeeCents;
@@ -266,7 +268,7 @@ export function Funds({ state, navigate, busy, run }: Pick<OrderProps, "state" |
   const [fundingId, setFundingId] = useState<string | null>(null);
   const mode = state.escrow;
   const testnet = mode.mode === "testnet";
-  const format = (value: number) => paymentAmount(value, mode.mode, testnet ? mode.tokenSymbol : undefined);
+  const format = (value: number) => testnet ? paymentAmount(value, "testnet", mode.tokenSymbol) : money(value);
   const balances = state.orders.filter((order) => (order.paymentMode ?? "demo") === mode.mode);
   const { funded, released, refunded } = balances.reduce((totals, order) => ({
     funded: totals.funded + order.fundedCents, released: totals.released + order.releasedCents, refunded: totals.refunded + order.refundedCents,
@@ -279,7 +281,7 @@ export function Funds({ state, navigate, busy, run }: Pick<OrderProps, "state" |
     [order.reference, order.product, companyName(state, order.supplierId), companyName(state, order.buyerId),
       transactionKinds[transaction.kind].label, transaction.status, transaction.hash]
       .some((value) => value?.toLowerCase().includes(needle)));
-  const canFund = state.actor && ["owner", "approver"].includes(state.actor.role) && (testnet || state.actor.demoRole);
+  const canFund = state.actor && ["owner", "approver"].includes(state.actor.role) && (testnet || (mode.mode === "demo" && state.actor.demoRole));
   const payable = canFund ? state.orders.filter((order) => order.buyerId === state.actor?.companyId && order.status === "awaiting_funding") : [];
   const checkout = payable.find((order) => order.id === fundingId);
   const filters = ["all", "funding", "release", "refund"] as const;
@@ -295,7 +297,7 @@ export function Funds({ state, navigate, busy, run }: Pick<OrderProps, "state" |
   return <>
     <ViewTitle title="Payments" subtitle="Fund orders, track supplier payouts and find receipts." />
     <div className="payments-page">
-      <section className="payment-overview" aria-label="Escrow overview">
+      {mode.mode === "disabled" ? <p className="notice notice-warn"><Wallet size={16} />Testnet funding is unavailable for this company.</p> : <section className="payment-overview" aria-label="Escrow overview">
         <div className="payment-balance">
           <div className="payment-balance-header"><span><LockKeyhole size={17} /> In escrow</span><span className="payment-mode">{testnet ? mode.networkName : "Demo payments"}</span></div>
           <strong className="payment-balance-number">{format(held)}</strong>
@@ -309,7 +311,7 @@ export function Funds({ state, navigate, busy, run }: Pick<OrderProps, "state" |
           <div><dt><ArrowUpRight size={17} /> Released</dt><dd>{format(released)}</dd></div>
           <div><dt><ArrowDownLeft size={17} /> Refunded</dt><dd>{format(refunded)}</dd></div>
         </dl>
-      </section>
+      </section>}
       {payable.length > 0 && <section className="card payment-due">
         <PanelTitle title="Awaiting payment" subtitle="Reserve funds for your approved orders." />
         {payable.map((order) => <div className="payment-due-row" key={order.id}>

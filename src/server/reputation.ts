@@ -29,7 +29,7 @@ export async function replyReview(db: DbSession, actor: Actor, input: unknown) {
   await update(db, tables.reviews, reviewId, updated);
   await audit(db, actor, 'reply_review', reviewId);
   await notify(db, review.buyerId, 'Supplier replied to your review', 'Open Reviews to read the supplier reply.', '#reviews');
-  return updated;
+  return { ...updated, moderationNote: undefined, hidden: undefined };
 }
 
 export async function reportReview(db: DbSession, actor: Actor, input: unknown) {

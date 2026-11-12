@@ -39,7 +39,7 @@ export async function supplierRequest(db: DbSession, actor: Actor, requestId: st
 
 export function orderScope(actor: Actor) {
   if (actor.role === 'reviewer') return sql`company_id in (select id from companies where demo = ${Boolean(actor.demoRole)})`;
-  if (actor.role === 'driver') return sql`data->>'driverId' = ${actor.id}`;
+  if (actor.role === 'driver') return sql`(supplier_id = ${actor.companyId} and data->>'driverId' = ${actor.id})`;
   if (actor.role === 'sales') return sql`supplier_id = ${actor.companyId}`;
   if (actor.role === 'purchaser' || actor.role === 'approver') return sql`company_id = ${actor.companyId}`;
   return sql`(company_id = ${actor.companyId} or supplier_id = ${actor.companyId})`;
@@ -55,7 +55,7 @@ export function buyerAccess(actor: Actor, order: Order, ...roles: CompanyRole[])
 }
 
 export function supplierAccess(actor: Actor, order: Order, allowDriver = false) {
-  if (allowDriver && actor.role === 'driver' && order.driverId === actor.id) return;
+  if (allowDriver && actor.role === 'driver' && order.supplierId === actor.companyId && order.driverId === actor.id) return;
   requireRole(actor, 'owner', 'sales');
   if (order.supplierId !== actor.companyId) throw new MarketplaceError('This action requires the supplier company or its assigned driver.', 403);
 }

@@ -92,6 +92,19 @@ export async function signRelease(config: EscrowConfiguration, input: { authoriz
   return walletClients(config).wallet.signTypedData({ account, ...releaseTypedData(config, input.authorization) });
 }
 
+export async function revokeEscrowAuthorization(config: EscrowConfiguration, input: { authorization: EscrowAuthorization; buyerWallet: string }) {
+  const account = await requireWallet(config, input.buyerWallet);
+  const { wallet, client } = walletClients(config);
+  const { authorization } = input;
+  const contract = { address: config.contract, abi: escrowAbi };
+  const args = [authorization.orderId, authorization.nonce] as const;
+  if (await client.readContract({ ...contract, functionName: 'unavailableNonces', args })) return;
+  const { request } = await client.simulateContract({ ...contract, account, functionName: 'cancelAuthorization', args });
+  const hash = await wallet.writeContract(request);
+  const receipt = await client.waitForTransactionReceipt({ hash, confirmations: config.confirmations, timeout: 30_000 });
+  if (receipt.status !== 'success') throw new Error('The wallet transaction did not revoke this handover code.');
+}
+
 export async function releaseEscrow(config: EscrowConfiguration, input: {
   authorization: EscrowAuthorization;
   buyerSignature: Hex;

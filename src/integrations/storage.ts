@@ -57,10 +57,11 @@ function r2Storage(): PrivateStorage | null {
 }
 
 export function selectStorage(demo: boolean, kind?: StorageKind) {
-  if (kind !== "local") {
+  const localConfigured = process.env.STOCKPACT_STORAGE_MODE === "local" && !!process.env.STOCKPACT_FILE_PATH;
+  if (kind === "r2" || (kind === undefined && !localConfigured)) {
     const provider = r2Storage();
     if (provider) return { kind: "r2" as const, provider };
     if (kind === "r2") return null;
   }
-  return demo ? { kind: "local" as const, provider: localStorage } : null;
+  return demo || localConfigured ? { kind: "local" as const, provider: localStorage } : null;
 }

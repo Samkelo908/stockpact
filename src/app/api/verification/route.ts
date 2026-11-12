@@ -65,6 +65,7 @@ export async function POST(request: Request) {
         provider: provider.sandbox ? "persona-sandbox" : "persona", providerReference: inquiry });
       if (!provider.sandbox) {
         company.verification[scope] = "pending";
+        company.verificationReviewIds = { ...company.verificationReviewIds, [scope]: attempt.attempt_id };
         await update(db, tables.companies, company.id, company);
       }
     });

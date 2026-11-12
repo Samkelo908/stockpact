@@ -130,7 +130,8 @@ export function StockPact() {
 
   if (!state) return <main className="auth-screen"><section className="card auth-card stack"><Brand />{loadError ? <><p role="alert" className="notice notice-error"><CircleAlert size={17} />{loadError}</p><div><button className="primary" type="button" onClick={() => void refresh()}>Try again</button></div></> : <Busy label="Opening your procurement workspace" />}</section></main>;
 
-  if (!state.actor || (typeof window !== "undefined" && new URLSearchParams(window.location.search).has("token"))) return <AuthScreen state={state} busy={busy} run={run} notice={showNotice} />;
+  const authParams = new URLSearchParams(typeof window === "undefined" ? "" : window.location.search);
+  if (!state.actor || authParams.has("token") || (authParams.has("reset") && authParams.get("error") === "INVALID_TOKEN")) return <AuthScreen state={state} busy={busy} run={run} notice={showNotice} />;
 
   const actor = state.actor;
   const company = companyOf(state, actor.companyId);
@@ -212,8 +213,15 @@ export function StockPact() {
 
 function AuthScreen({ state, busy, run, notice }: { state: MarketplaceState; busy: string; run: RunAction; notice: React.ReactNode }) {
   const params = new URLSearchParams(typeof window === "undefined" ? "" : window.location.search);
-  const [mode, setMode] = useState<"signIn" | "register" | "recovery" | "reset">(params.has("token") ? "reset" : "signIn");
-  const [status, setStatus] = useState<{ error: boolean; text: string } | null>(null);
+  const invalidReset = params.has("reset") && params.get("error") === "INVALID_TOKEN";
+  const [mode, setMode] = useState<"signIn" | "register" | "recovery" | "reset">(params.has("token") ? "reset" : invalidReset ? "recovery" : "signIn");
+  const [status, setStatus] = useState<{ error: boolean; text: string } | null>(invalidReset ? { error: true, text: "This reset link has expired or was already used. Request a new link." } : null);
+
+  function clearRecoveryLink() {
+    for (const name of ["token", "reset", "error"]) params.delete(name);
+    const query = params.toString();
+    window.history.replaceState(null, "", `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`);
+  }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -224,7 +232,7 @@ function AuthScreen({ state, busy, run, notice }: { state: MarketplaceState; bus
     const result = await run<{ message: string }>(resetting ? "resetPassword" : "requestPasswordReset", resetting ? { password: values.password, token: params.get("token") } : { email: values.email });
     if (result?.data) setStatus({ error: false, text: result.data.message });
     if (resetting && result) {
-      window.history.replaceState(null, "", `${window.location.pathname}${window.location.hash}`);
+      clearRecoveryLink();
       setMode("signIn");
     }
   }
@@ -240,7 +248,7 @@ function AuthScreen({ state, busy, run, notice }: { state: MarketplaceState; bus
       {mode !== "recovery" && <label className="field">Password<input type="password" name="password" minLength={10} autoComplete={mode === "signIn" ? "current-password" : "new-password"} required /></label>}
       <button type="submit" className="primary" disabled={!!busy}>{mode === "register" ? "Create workspace" : mode === "recovery" ? "Request reset link" : mode === "reset" ? "Update password" : "Sign in"}<ArrowRight size={16} /></button>
     </form>
-    <div className="button-row"><button type="button" className="secondary" onClick={() => { setStatus(null); setMode(mode === "signIn" ? "register" : "signIn"); }}>{mode === "signIn" ? "Register a business" : "Back to sign-in"}</button>{mode === "signIn" && <button type="button" className="secondary" onClick={() => { setStatus(null); setMode("recovery"); }}>Forgot password</button>}</div>
-    {state.demo && !!state.roles.length && <button type="button" className="secondary" disabled={!!busy} onClick={() => void run("switchRole", { role: "buyer" })}><Boxes size={16} />Open fictional demo</button>}
+    <div className="button-row"><button type="button" className="secondary" onClick={() => { if (mode === "reset" || invalidReset) clearRecoveryLink(); setStatus(null); setMode(mode === "signIn" ? "register" : "signIn"); }}>{mode === "signIn" ? "Register a business" : "Back to sign-in"}</button>{mode === "signIn" && <button type="button" className="secondary" onClick={() => { setStatus(null); setMode("recovery"); }}>Forgot password</button>}</div>
+    {mode !== "reset" && !invalidReset && state.demo && !!state.roles.length && <button type="button" className="secondary" disabled={!!busy} onClick={() => void run("switchRole", { role: "buyer" })}><Boxes size={16} />Open fictional demo</button>}
   </section></main>;
 }
