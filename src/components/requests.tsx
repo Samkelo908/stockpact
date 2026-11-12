@@ -10,9 +10,13 @@ import { Dialog, Empty, PanelTitle, Tag, ViewTitle, dateLabel, money, number } f
 export function Requests({ state, selected, busy, run, navigate }: { state: MarketplaceState; selected: string; busy: string; run: RunAction; navigate: Navigate }) {
   const request = state.requests.find((item) => item.id === selected) ?? state.requests[0];
   const canBuy = companyOf(state, state.actor?.companyId)?.capabilities.includes("buyer") && ["owner", "purchaser"].includes(state.actor?.role ?? "");
+  const searching = request?.status === "matching" || busy === "matchRequest";
+  const matchCount = request?.matches.length ?? 0;
   return <>
     <ViewTitle title="Requests & quotes" subtitle="Track supplier invitations and compare the terms you receive." action={canBuy ? <button className="primary" type="button" onClick={() => navigate("assistant")}><ClipboardList size={16} />New request</button> : undefined} />
-    {(request?.status === "matching" || busy === "matchRequest") && <div className="page-progress"><SearchProgress title="Finding matching suppliers" detail="Checking the catalogue, quantities, delivery coverage and required date." /></div>}
+    {searching ? <SearchProgress title="Finding matching suppliers" detail="Checking stock, quantities, delivery coverage and your required date." /> :
+      request?.status === "matched" && <SearchProgress key={request.id} complete title="Supplier search complete"
+        detail={matchCount ? number(matchCount) + (matchCount === 1 ? " matching supplier ready to review." : " matching suppliers ready to review.") : "No suppliers matched this request."} />}
     <div className="workspace-grid">
       <section className="card panel small-stack workspace-selector">
         <PanelTitle title="Purchase requests" subtitle={`${number(state.requests.length)} in this workspace`} />

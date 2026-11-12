@@ -148,6 +148,7 @@ test("registers a separate company and restores its session on sign-in", async (
 
 test("fits a phone, supports keyboard focus and shows search progress while waiting", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "phone", "This check uses the mobile viewport.");
+  await page.emulateMedia({ reducedMotion: "no-preference" });
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Procurement overview" })).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("phone-overview.png"), animations: "disabled" });
@@ -158,13 +159,16 @@ test("fits a phone, supports keyboard focus and shows search progress while wait
   await page.getByLabel("Describe your requirement").fill("I need 20 cases of still water delivered to Cape Town by " + delivery);
   await page.getByRole("button", { name: "Build request" }).click();
   await expect(page.getByLabel("Product and specification")).toBeVisible();
-  await page.route("**/api/actions", async (route) => {
-    if (route.request().postDataJSON().action !== "matchRequest") return route.continue();
-    await expect(page.getByRole("status").filter({ hasText: "Finding matching suppliers" })).toBeInViewport();
-    await page.screenshot({ path: testInfo.outputPath("phone-search.png"), animations: "disabled" });
-    await route.continue();
+  await expect(page.getByRole("status").filter({ hasText: "Request ready to review" })).toBeInViewport();
+  const motion = page.waitForFunction(() => {
+    const status = document.querySelector('[role="status"][data-state="complete"]');
+    if (!status?.textContent?.includes("Supplier search complete")) return false;
+    const track = status.querySelector(".search-progress-track");
+    return track?.getAnimations({ subtree: true }).some((animation) => animation.playState === "running");
   });
   await page.getByRole("button", { name: "Find suppliers" }).click();
+  await motion;
+  await expect(page.getByRole("status").filter({ hasText: "Supplier search complete" })).toBeInViewport();
   await expect(page.getByRole("heading", { name: "Matching suppliers" })).toBeVisible();
   await expect(page.getByRole("status").filter({ hasText: "Finding matching suppliers" })).toHaveCount(0);
 });

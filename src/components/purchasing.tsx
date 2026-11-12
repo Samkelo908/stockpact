@@ -2,7 +2,7 @@
 
 import { useState, type FormEvent } from "react";
 import Image from "next/image";
-import { ArrowRight, ArrowUpRight, AudioLines, Banknote, ClipboardList, FileCheck2, FileText, MapPin, PackageCheck, ScanLine, Search, ShieldCheck, Store, Truck } from "lucide-react";
+import { ArrowRight, ArrowUpRight, AudioLines, Banknote, Check, ClipboardList, FileCheck2, FileText, LoaderCircle, MapPin, PackageCheck, ScanLine, Search, ShieldCheck, Store, Truck } from "lucide-react";
 import type { MarketplaceState, PurchaseRequest, RequestDraft } from "../shared/marketplace";
 import { cents, companyOf, type Navigate, type RunAction } from "./client";
 import { Empty, PanelTitle, Tag, TextButton, ViewTitle, dateLabel, number } from "./ui";
@@ -104,11 +104,17 @@ export function Dashboard({ state, prompt, setPrompt, busy, generate, setDraft, 
   </div>;
 }
 
-export function SearchProgress({ title, detail }: { title: string; detail: string }) {
-  return <div className="search-progress" role="status" aria-live="polite"><div className="progress-heading"><div className="radar" aria-hidden="true"><Search size={19} /></div><div><strong>{title}</strong><p>{detail}</p></div></div><div className="search-progress-track" aria-hidden="true" /></div>;
+export function SearchProgress({ title, detail, complete = false }: { title: string; detail: string; complete?: boolean }) {
+  return <div className="search-progress" data-state={complete ? "complete" : "pending"} role="status" aria-atomic="true">
+    <div className="progress-heading">
+      <div className="radar" aria-hidden="true">{complete ? <Check size={20} /> : <Search size={20} />}</div>
+      <div><strong>{title}</strong><p>{detail}</p></div>
+    </div>
+    <div className="search-progress-track" aria-hidden="true" />
+  </div>;
 }
 
-function RequestForm({ draft, setDraft, onSubmit, disabled }: { draft: RequestDraft; setDraft: (draft: RequestDraft) => void; onSubmit: () => Promise<void>; disabled: boolean }) {
+function RequestForm({ draft, setDraft, onSubmit, disabled, searching }: { draft: RequestDraft; setDraft: (draft: RequestDraft) => void; onSubmit: () => Promise<void>; disabled: boolean; searching: boolean }) {
   const update = <K extends keyof RequestDraft>(key: K, value: RequestDraft[K]) => setDraft({ ...draft, [key]: value });
   return <form className="stack" onSubmit={(event) => { event.preventDefault(); void onSubmit(); }}>
     {draft.missing && draft.missing.length > 0 && <div className="notice notice-warn"><ClipboardList size={16} />Check {draft.missing.join(", ")} before searching.</div>}
@@ -126,13 +132,24 @@ function RequestForm({ draft, setDraft, onSubmit, disabled }: { draft: RequestDr
       <label className="check"><input type="checkbox" checked={draft.substitutions} onChange={(event) => update("substitutions", event.currentTarget.checked)} />Allow suppliers to propose substitutions</label>
       <label className="check"><input type="checkbox" checked={!!draft.shareBudget} onChange={(event) => update("shareBudget", event.currentTarget.checked)} />Share my budget with suppliers</label>
     </div>
-    <div className="button-row"><button type="submit" className="primary" disabled={disabled}><Search size={16} />Find suppliers</button></div>
+    <div className="button-row"><button type="submit" className="primary" disabled={disabled}>
+      {searching ? <><LoaderCircle className="spin" size={16} />Finding suppliers…</> : <><Search size={16} />Find suppliers</>}
+    </button></div>
   </form>;
 }
 
 export function Assistant({ state, prompt, setPrompt, draft, setDraft, busy, generate, navigate, run }: ComposerProps & { run: RunAction }) {
   const [lastPrompt, setLastPrompt] = useState("");
   const company = companyOf(state, state.actor?.companyId);
+  const building = busy === "draftRequest";
+  const searching = busy === "createRequest";
+  const feedback = building
+    ? { title: "Preparing your request", detail: "Reading the details you entered." }
+    : searching
+      ? { title: "Finding matching suppliers", detail: "Saving your request before checking the catalogue." }
+      : draft && draft.mode !== "manual"
+        ? { title: "Request ready to review", detail: "Check the details before you search for suppliers.", complete: true }
+        : null;
 
   function onPrompt(event: FormEvent) {
     event.preventDefault();
@@ -153,20 +170,20 @@ export function Assistant({ state, prompt, setPrompt, draft, setDraft, busy, gen
 
   return <>
     <ViewTitle title="Source stock" subtitle="Type, speak or enter the details of your purchase request." action={<Tag value={state.aiMode === "cloudflare" ? "Cloudflare AI" : "Demo assistant"} variant={state.aiMode === "cloudflare" ? "green" : "amber"} />} />
+    {feedback && <SearchProgress {...feedback} />}
     <div className="workspace-grid">
       <section className="card panel stack">
         <PanelTitle title="Purchasing assistant" subtitle="What does your business need?" />
         {(lastPrompt || draft?.mode === "cloudflare" || draft?.mode === "demo") && <div className="chat-bubble"><strong>Your requirement</strong><p>{lastPrompt || prompt}</p></div>}
-        {busy === "draftRequest" && <SearchProgress title="Preparing your request" detail="Reading your requirement and checking the details to review." />}
         <form className="small-stack" onSubmit={onPrompt}>
           <label className="field">Describe the goods you need<textarea className="composer-text" value={prompt} onChange={(event) => setPrompt(event.currentTarget.value)} maxLength={2000} placeholder="I need 20 cases of 500 ml still water delivered to Cape Town." required /></label>
-          <div className="button-row"><Voice onTranscript={setPrompt} disabled={!!busy} preferCloudflare={state.aiMode === "cloudflare"} /><button className="primary" type="submit" disabled={!!busy}>Build request<ArrowRight size={16} /></button></div>
+          <div className="button-row"><Voice onTranscript={setPrompt} disabled={!!busy} preferCloudflare={state.aiMode === "cloudflare"} /><button className="primary" type="submit" disabled={!!busy}>{building ? <>Preparing request…<LoaderCircle className="spin" size={16} /></> : <>Build request<ArrowRight size={16} /></>}</button></div>
         </form>
         <button className="secondary" type="button" onClick={() => setDraft(freshDraft(company?.location))} disabled={!!busy}><ClipboardList size={16} />Use guided form</button>
       </section>
       <section className="card panel">
         <PanelTitle title="Review your request" subtitle="Check quantities, dates and delivery details before finding suppliers." />
-        {draft ? <RequestForm draft={draft} setDraft={setDraft} onSubmit={match} disabled={!!busy} /> : <Empty title="No request to review yet" detail="Describe what you need or open the guided form." icon={AudioLines} />}
+        {draft ? <RequestForm draft={draft} setDraft={setDraft} onSubmit={match} disabled={!!busy} searching={searching} /> : <Empty title="No request to review yet" detail="Describe what you need or open the guided form." icon={AudioLines} />}
       </section>
     </div>
   </>;
