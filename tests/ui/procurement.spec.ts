@@ -156,10 +156,14 @@ test("fits a phone, supports keyboard focus and shows search progress while wait
   await page.keyboard.press("Tab");
   expect(await page.evaluate(() => document.activeElement !== document.body)).toBeTruthy();
   const delivery = new Date(Date.now() + 8 * 86400000).toISOString().slice(0, 10);
-  await page.getByLabel("Describe your requirement").fill("I need 20 cases of still water delivered to Cape Town by " + delivery);
+  await page.getByLabel("Describe your requirement").fill("I need 20 cases of still water delivered to Cape Town.");
   await page.getByRole("button", { name: "Build request" }).click();
   await expect(page.getByLabel("Product and specification")).toBeVisible();
   await expect(page.getByRole("status").filter({ hasText: "Request ready to review" })).toBeInViewport();
+  const requiredDateHint = page.getByText("Fill in the required date to start the supplier search.");
+  await expect(requiredDateHint).toBeVisible();
+  await page.getByLabel("Required by").fill(delivery);
+  await expect(requiredDateHint).toHaveCount(0);
   const motion = page.waitForFunction(() => {
     const status = document.querySelector('[role="status"][data-state="complete"]');
     if (!status?.textContent?.includes("Supplier search complete")) return false;

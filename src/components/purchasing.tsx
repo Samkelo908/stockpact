@@ -116,8 +116,14 @@ export function SearchProgress({ title, detail, complete = false }: { title: str
 
 function RequestForm({ draft, setDraft, onSubmit, disabled, searching }: { draft: RequestDraft; setDraft: (draft: RequestDraft) => void; onSubmit: () => Promise<void>; disabled: boolean; searching: boolean }) {
   const update = <K extends keyof RequestDraft>(key: K, value: RequestDraft[K]) => setDraft({ ...draft, [key]: value });
+  const missing = [
+    !draft.product.trim() && "product",
+    draft.quantity < 1 && "quantity",
+    !draft.unit.trim() && "unit",
+    !draft.collection && !draft.location.trim() && "delivery area",
+    !draft.requiredDate && "required date",
+  ].filter((item): item is string => typeof item === "string");
   return <form className="stack" onSubmit={(event) => { event.preventDefault(); void onSubmit(); }}>
-    {draft.missing && draft.missing.length > 0 && <div className="notice notice-warn"><ClipboardList size={16} />Check {draft.missing.join(", ")} before searching.</div>}
     <div className="form-grid">
       <label className="field full">Product and specification<input required value={draft.product} onChange={(event) => update("product", event.currentTarget.value)} maxLength={180} /></label>
       <label className="field">Quantity<input type="number" min="1" max="100000" required value={draft.quantity || ""} onChange={(event) => update("quantity", Number(event.currentTarget.value))} /></label>
@@ -132,7 +138,10 @@ function RequestForm({ draft, setDraft, onSubmit, disabled, searching }: { draft
       <label className="check"><input type="checkbox" checked={draft.substitutions} onChange={(event) => update("substitutions", event.currentTarget.checked)} />Allow suppliers to propose substitutions</label>
       <label className="check"><input type="checkbox" checked={!!draft.shareBudget} onChange={(event) => update("shareBudget", event.currentTarget.checked)} />Share my budget with suppliers</label>
     </div>
-    <div className="button-row"><button type="submit" className="primary" disabled={disabled}>
+    {missing.length > 0 && <p id="request-search-details" className="notice notice-warn">
+      <ClipboardList size={16} />Fill in the {new Intl.ListFormat("en-ZA").format(missing)} to start the supplier search.
+    </p>}
+    <div className="button-row"><button type="submit" className="primary" disabled={disabled} aria-describedby={missing.length ? "request-search-details" : undefined}>
       {searching ? <><LoaderCircle className="spin" size={16} />Finding suppliers…</> : <><Search size={16} />Find suppliers</>}
     </button></div>
   </form>;
