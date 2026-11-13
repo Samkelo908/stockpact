@@ -37,7 +37,7 @@ function loginPage(response, status = 200, message = '') {
   response.writeHead(status, {
     ...cookieHeaders, 'content-type': 'text/html; charset=utf-8',
     'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
-    'referrer-policy': 'no-referrer',
+    'referrer-policy': 'same-origin',
   }).end(`<!doctype html><html lang="en-ZA"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Sign in to StockPact</title>
 <style>*{box-sizing:border-box}body{margin:0;background:#f8f4eb;color:#211b17;font:16px/1.5 system-ui}
