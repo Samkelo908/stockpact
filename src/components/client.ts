@@ -24,12 +24,27 @@ export function cents(input: string): number {
 }
 
 export function download(name: string, content: string, type = "text/plain;charset=utf-8") {
-  const url = URL.createObjectURL(new Blob([content], { type }));
+  const blob = new Blob([content], { type });
+  if (navigator.userAgent.includes("StockPactAndroid/")) {
+    const reader = new FileReader();
+    reader.addEventListener("load", () => {
+      const target = window as Window & { stockPactAndroidExport?: () => string };
+      target.stockPactAndroidExport = () => String(reader.result).split(",", 2)[1] ?? "";
+      window.location.assign(`stockpact-export://save?${new URLSearchParams({ name, type: blob.type.split(";")[0] })}`);
+    });
+    reader.readAsDataURL(blob);
+    return;
+  }
+  const url = URL.createObjectURL(blob);
+  saveDownload(name, url);
+  window.setTimeout(() => URL.revokeObjectURL(url), 3000);
+}
+
+function saveDownload(name: string, url: string) {
   const link = document.createElement("a");
   link.href = url;
   link.download = name;
   link.click();
-  window.setTimeout(() => URL.revokeObjectURL(url), 3000);
 }
 
 export function csv(rows: (string | number | undefined)[][]) {
