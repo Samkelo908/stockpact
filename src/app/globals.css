@@ -191,6 +191,8 @@ a { color: var(--accent-ink); }
 .app-notice { position: sticky; top: 6px; z-index: 3; margin: 0 0 10px; box-shadow: var(--shadow); }
 .app-notice span { flex: 1; }
 .app-notice button { border: 0; background: transparent; padding: 0 3px; color: inherit; }
+.reconnect-notice { align-items: center; }
+.reconnect-notice button { border: 1px solid currentColor; border-radius: 6px; padding: 6px 9px; }
 .inline-busy { display: inline-flex; align-items: center; gap: 8px; color: #765109; font-size: 12px; font-weight: 630; }
 .spin { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }

@@ -36,7 +36,10 @@ export async function POST(request: Request) {
     }
     const result = await marketplaceAction(action, input);
     const actor = 'actor' in result ? result.actor ?? null : await getActor();
-    if ((action === 'matchRequest' || action === 'createMultiRequest') && actor) after(async () => { await runMatchingJobs(actor.companyId); });
+    if (actor && (action === 'matchRequest' || action === 'createMultiRequest' ||
+        (action === 'createRequest' && 'findSuppliers' in input && input.findSuppliers === true))) {
+      after(async () => { await runMatchingJobs(actor.companyId); });
+    }
     if (actor && ['redeemDelivery', 'retryXrplPayment', 'requeueXrplPayment'].includes(action) && result.data &&
         typeof result.data === 'object' && 'xrplAttemptId' in result.data && typeof result.data.xrplAttemptId === 'string') {
       const attemptId = result.data.xrplAttemptId;

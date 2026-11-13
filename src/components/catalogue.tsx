@@ -4,6 +4,7 @@ import Image from "next/image";
 import { createElement, useState, type FormEvent } from "react";
 import { ArrowRight, Boxes, ClipboardList, Coffee, Download, Droplets, Heart, MapPin, Package, Plus, Search, ShoppingBag, Star, Store, Upload } from "lucide-react";
 import type { Listing, MarketplaceState, RequestDraft } from "../shared/marketplace";
+import { BuiltInPhoto } from "./built-in-photo";
 import { cents, companyOf, csv, download, type Navigate, type RunAction } from "./client";
 import { freshDraft } from "./purchasing";
 import { Dialog, Empty, PanelTitle, Tag, ViewTitle, dateLabel, money, number } from "./ui";
@@ -29,10 +30,11 @@ function catalogueIcon(category: string) {
 
 function CataloguePhoto({ listing }: { listing: Listing }) {
   const [failedSource, setFailedSource] = useState<string>();
-  const source = listing.image?.startsWith('/api/listing-photo?') ? listing.image : listing.demo ? cataloguePhotos[listing.id] : undefined;
-  return source && failedSource !== source
-    ? <Image src={source} alt="" fill unoptimized sizes="(max-width: 600px) 100vw, 320px" onError={() => setFailedSource(source)} />
-    : createElement(catalogueIcon(listing.category), { size: 40, strokeWidth: 1.4, "aria-hidden": true });
+  const uploaded = listing.image?.startsWith("/api/listing-photo?") ? listing.image : undefined;
+  const builtIn = listing.demo ? cataloguePhotos[listing.id] : undefined;
+  const fallback = createElement(catalogueIcon(listing.category), { size: 40, strokeWidth: 1.4, "aria-hidden": true });
+  if (uploaded && failedSource !== uploaded) return <Image src={uploaded} alt="" fill unoptimized onError={() => setFailedSource(uploaded)} />;
+  return builtIn ? <BuiltInPhoto key={builtIn} src={builtIn} alt="" fallback={fallback} /> : fallback;
 }
 
 const singularUnits: Record<string, string> = { cases: "case", boxes: "box", bottles: "bottle", bags: "bag", packs: "pack", units: "unit" };

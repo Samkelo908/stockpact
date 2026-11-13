@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, type FormEvent, type ReactNode } from "react";
-import Image from "next/image";
 import { ArrowRight, ArrowUpRight, AudioLines, Banknote, Check, ClipboardList, FileCheck2, FileText, ListPlus, LoaderCircle, MapPin, PackageCheck, ScanLine, Search, ShieldCheck, Store, Truck } from "lucide-react";
 import type { MarketplaceState, PurchaseRequest, RequestDraft } from "../shared/marketplace";
 import { cents, companyOf, type Navigate, type RunAction } from "./client";
@@ -9,6 +8,7 @@ import { Empty, PanelTitle, Tag, TextButton, ViewTitle, dateLabel, number } from
 import { Voice } from "./voice";
 import { orderStateLabel } from "./xrpl-autopay";
 import { MultiPurchaseForm } from "./multi-purchase";
+import { BuiltInPhoto } from "./built-in-photo";
 
 export function freshDraft(location = "Cape Town"): RequestDraft {
   return { product: "", quantity: 1, unit: "units", location, requiredDate: "", budgetCents: null, notes: "", category: "", substitutions: false, collection: false, shareBudget: false, mode: "manual" };
@@ -75,7 +75,7 @@ export function Dashboard({ state, prompt, setPrompt, busy, generate, setDraft, 
         </div>
       </div>
       <figure className="sourcing-photo">
-        <Image src="/cape-town-shop-delivery.webp" alt="A Cape Town shop owner checks her phone as a supplier delivers a box of stock" fill unoptimized loading="eager" />
+        <BuiltInPhoto src="/cape-town-shop-delivery.webp" alt="A Cape Town shop owner checks her phone as a supplier delivers a box of stock" eager fallback={<div className="sourcing-photo-fallback" aria-hidden="true"><Truck size={42} strokeWidth={1.4} /></div>} />
         <figcaption><MapPin size={13} aria-hidden="true" />Cape Town, South Africa</figcaption>
       </figure>
     </section>}
@@ -173,13 +173,11 @@ export function Assistant({ state, prompt, setPrompt, draft, setDraft, busy, gen
 
   async function match() {
     if (!draft) return;
-    const result = await run<PurchaseRequest>("createRequest", { draft });
-    if (!result) return;
-    const request = result.data ?? result.state.requests.find((item) => item.buyerId === state.actor?.companyId && item.status === "draft");
+    const result = await run<PurchaseRequest>("createRequest", { draft, findSuppliers: true });
+    const request = result?.data;
     if (!request) return;
     setDraft(null);
     navigate("requests", request.id);
-    await run("matchRequest", { requestId: request.id });
   }
 
   return <>

@@ -14,11 +14,20 @@ export type SupplierInvitation = Omit<SupplierResponse, 'supplierId'> & { create
 export async function createRequest(db: DbSession, actor: Actor, input: unknown) {
   requireRole(actor, 'owner', 'purchaser');
   requireCapability(await actorCompany(actor, db), 'buyer');
-  const details = parse(z.object({ draft }), input).draft;
+  const { draft: details, requestId, findSuppliers } = parse(z.object({ draft, requestId: z.uuid().optional(), findSuppliers: z.boolean().optional() }), input);
+  if (requestId) {
+    const existing = await record<PurchaseRequest>(db, tables.requests, requestId);
+    if (existing) {
+      if (existing.buyerId !== actor.companyId || JSON.stringify(parse(draft, existing.draft)) !== JSON.stringify(details)) {
+        throw new MarketplaceError('This request could not be resumed. Update the form and try again.', 409);
+      }
+      return findSuppliers && existing.status === 'draft' ? queueMatching(db, existing) : existing;
+    }
+  }
   if (details.requiredDate < dateIn(0)) throw new MarketplaceError('The required date must be today or later.', 422);
-  const request = newPurchaseRequest(actor.companyId, details);
+  const request = { ...newPurchaseRequest(actor.companyId, details), ...(requestId ? { id: requestId } : {}) };
   await save(db, tables.requests, request.id, request, { company_id: actor.companyId });
-  return request;
+  return findSuppliers ? queueMatching(db, request) : request;
 }
 
 function newPurchaseRequest(buyerId: string, details: RequestDraft): PurchaseRequest {

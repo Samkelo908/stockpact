@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { ArrowRight, Banknote, Bell, Boxes, Building2, ChevronDown, ChevronRight, CircleAlert, CircleCheck, ClipboardList, House, LogOut, Menu, Package, PackageCheck, Search, Settings, ShieldCheck, Star, Store, Truck, X, type LucideIcon } from "lucide-react";
 import type { MarketplaceState, RequestDraft } from "../shared/marketplace";
-import { companyOf, initials, views, type Navigate, type Result, type RunAction, type View } from "./client";
+import { companyOf, initials, views, workspaceJson, WorkspaceReconnectError, type Navigate, type Result, type RunAction, type View } from "./client";
 import { Assistant, Dashboard } from "./purchasing";
 import { Requests } from "./requests";
 import { Funds, Orders } from "./orders";
@@ -28,6 +28,8 @@ const nav: { id: View; title: string; short: string; icon: LucideIcon; group: "W
 
 type Route = { view: View; selected: string };
 const start: Route = { view: "home", selected: "" };
+const recoveryKey = 'stockpact:request-recovery:v1';
+type RequestRecovery = { actorId: string; companyId: string; savedAt: number; prompt: string; draft: RequestDraft | null; requestId?: string };
 
 function readRoute(): Route {
   const [section, ...details] = window.location.hash.slice(1).split("/");
@@ -45,6 +47,7 @@ export function StockPact() {
   const [route, setRoute] = useState<Route>(start);
   const [notice, setNotice] = useState<{ text: string; error: boolean } | null>(null);
   const [loadError, setLoadError] = useState("");
+  const [needsReconnect, setNeedsReconnect] = useState<'refresh' | 'action' | null>(null);
   const [busy, setBusy] = useState("");
   const [dialog, setDialog] = useState<"profile" | "notifications" | "more" | "search" | null>(null);
   const [query, setQuery] = useState("");
@@ -54,20 +57,46 @@ export function StockPact() {
   const actionActive = useRef(false);
   const revision = useRef(0);
   const activePoll = useRef(false);
+  const restored = useRef(false);
+  const requestSubmission = useRef<{ id: string; draft: string } | null>(null);
+
+  const restoreRequest = useCallback((actor: MarketplaceState['actor']) => {
+    if (restored.current || !actor) return;
+    restored.current = true;
+    try {
+      const saved = window.sessionStorage.getItem(recoveryKey);
+      window.sessionStorage.removeItem(recoveryKey);
+      if (!saved) return;
+      const previous = JSON.parse(saved) as RequestRecovery;
+      if (previous.actorId !== actor.id || previous.companyId !== actor.companyId || Date.now() - previous.savedAt > 60 * 60_000) return;
+      setPrompt(previous.prompt);
+      setDraft(previous.draft);
+      if (previous.draft && previous.requestId) requestSubmission.current = { id: previous.requestId, draft: JSON.stringify(previous.draft) };
+      window.history.replaceState(null, '', '#assistant');
+      setRoute({ view: 'assistant', selected: '' });
+    } catch { /* Session storage may be disabled. */ }
+  }, []);
 
   const refresh = useCallback(async (signal?: AbortSignal, silent = false) => {
     if (actionActive.current || activePoll.current) return;
     activePoll.current = true;
     const version = revision.current;
     try {
-      const response = await fetch("/api/state", { cache: "no-store", signal });
-      const body = await response.json() as MarketplaceState & { error?: string };
+      const { response, data: body } = await workspaceJson<MarketplaceState>('/api/state', { signal });
       if (!response.ok) throw new Error(body.error || "StockPact could not load. Try again.");
-      if (version === revision.current) { setState(body); setLoadError(""); }
+      if (version === revision.current) {
+        restoreRequest(body.actor);
+        setState(body);
+        setLoadError('');
+        setNeedsReconnect((current) => current === 'refresh' ? null : current);
+      }
     } catch (caught) {
-      if (!signal?.aborted && !silent) setLoadError(caught instanceof Error ? caught.message : "Unable to connect. Try again.");
+      if (!signal?.aborted && version === revision.current) {
+        if (caught instanceof WorkspaceReconnectError) setNeedsReconnect((current) => current ?? 'refresh');
+        else if (!silent) setLoadError(caught instanceof Error ? caught.message : "Unable to connect. Try again.");
+      }
     } finally { activePoll.current = false; }
-  }, []);
+  }, [restoreRequest]);
 
   useEffect(() => {
     const abort = new AbortController();
@@ -102,22 +131,40 @@ export function StockPact() {
     setBusy(action);
     setNotice(null);
     try {
-      const response = action === "saveListingPhoto" && values instanceof FormData
-        ? await fetch("/api/listing-photo", { method: "POST", body: values })
-        : await fetch("/api/actions", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...values, action }) });
-      const result = await response.json() as Result<T> & { error?: string };
-      if (result.state) setState(result.state);
+      if (action === 'createRequest' && values && !(values instanceof FormData) && values.findSuppliers === true) {
+        const submission = JSON.stringify(values.draft);
+        if (requestSubmission.current?.draft !== submission) requestSubmission.current = { id: crypto.randomUUID(), draft: submission };
+        values = { ...values, requestId: requestSubmission.current.id };
+      }
+      const { response, data: result } = action === "saveListingPhoto" && values instanceof FormData
+        ? await workspaceJson<Result<T>>("/api/listing-photo", { method: "POST", body: values })
+        : await workspaceJson<Result<T>>("/api/actions", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...values, action }) });
+      setNeedsReconnect(null);
+      if (result.state) { restoreRequest(result.state.actor); setState(result.state); }
       if (!response.ok || result.error) throw new Error(result.error || "That action could not be completed. Try again.");
+      if (action === 'createRequest') requestSubmission.current = null;
       if (success) setNotice({ text: success, error: false });
       return result;
     } catch (caught) {
-      setNotice({ text: caught instanceof Error ? caught.message : "Connection interrupted. Try again.", error: true });
+      if (caught instanceof WorkspaceReconnectError) setNeedsReconnect('action');
+      else setNotice({ text: caught instanceof Error ? caught.message : "Connection interrupted. Try again.", error: true });
       return null;
     } finally {
       actionActive.current = false;
       setBusy("");
     }
   };
+
+  function reconnect() {
+    const actor = state?.actor;
+    if (actor && route.view === 'assistant' && (draft || prompt)) {
+      const submission = requestSubmission.current;
+      const saved: RequestRecovery = { actorId: actor.id, companyId: actor.companyId, savedAt: Date.now(), prompt, draft,
+        requestId: submission && submission.draft === JSON.stringify(draft) ? submission.id : undefined };
+      try { window.sessionStorage.setItem(recoveryKey, JSON.stringify(saved)); } catch { /* Storage can be disabled. */ }
+    }
+    window.location.reload();
+  }
 
   async function generate() {
     if (!prompt.trim() || busy) return;
@@ -127,10 +174,14 @@ export function StockPact() {
     if (result?.data) setDraft(result.data);
   }
 
-  const startDraft = (value: RequestDraft) => { setPrompt(""); setDraft(value); navigate("assistant"); };
-  const showNotice = notice && <div className={`notice app-notice${notice.error ? " notice-error" : ""}`} role={notice.error ? "alert" : "status"}>{notice.error ? <CircleAlert size={17} /> : <CircleCheck size={17} />}<span>{notice.text}</span><button type="button" aria-label="Dismiss notice" onClick={() => setNotice(null)}><X size={17} /></button></div>;
+  const startDraft = (value: RequestDraft) => { requestSubmission.current = null; setPrompt(""); setDraft(value); navigate("assistant"); };
+  const reconnectNotice = needsReconnect && <div className="notice notice-warn app-notice reconnect-notice" role="alert">
+    <CircleAlert size={17} /><span>Reconnect to your StockPact workspace{state?.actor && route.view === 'assistant' && (draft || prompt) ? '. Your request details will be kept on this device' : ''}.</span>
+    <button type="button" className="secondary" onClick={reconnect}>Reconnect</button>
+  </div>;
+  const showNotice = reconnectNotice || (notice && <div className={`notice app-notice${notice.error ? " notice-error" : ""}`} role={notice.error ? "alert" : "status"}>{notice.error ? <CircleAlert size={17} /> : <CircleCheck size={17} />}<span>{notice.text}</span><button type="button" aria-label="Dismiss notice" onClick={() => setNotice(null)}><X size={17} /></button></div>);
 
-  if (!state) return <main className="auth-screen"><section className="card auth-card stack"><Brand />{loadError ? <><p role="alert" className="notice notice-error"><CircleAlert size={17} />{loadError}</p><div><button className="primary" type="button" onClick={() => void refresh()}>Try again</button></div></> : <Busy label="Opening your procurement workspace" />}</section></main>;
+  if (!state) return <main className="auth-screen"><section className="card auth-card stack"><Brand />{reconnectNotice || (loadError ? <><p role="alert" className="notice notice-error"><CircleAlert size={17} />{loadError}</p><div><button className="primary" type="button" onClick={() => void refresh()}>Try again</button></div></> : <Busy label="Opening your procurement workspace" />)}</section></main>;
 
   const authParams = new URLSearchParams(typeof window === "undefined" ? "" : window.location.search);
   if (!state.actor || authParams.has("token") || (authParams.has("reset") && authParams.get("error") === "INVALID_TOKEN")) return <AuthScreen state={state} busy={busy} run={run} notice={showNotice} />;
@@ -160,7 +211,7 @@ export function StockPact() {
     navigate("marketplace");
   }
 
-  return <DialogError.Provider value={notice?.error ? notice.text : ""}><div className="app">
+  return <DialogError.Provider value={reconnectNotice || (notice?.error ? notice.text : '')}><div className="app">
     <a className="skip-link" href="#workspace-content" onClick={(event) => { event.preventDefault(); document.getElementById("workspace-content")?.focus(); }}>Skip to content</a>
     <aside className="sidebar" aria-label="StockPact workspace">
       <Brand onClick={() => navigate("home")} />

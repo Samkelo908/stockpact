@@ -6,7 +6,7 @@ import { ArrowRight, CircleAlert, LoaderCircle, PackageOpen, X, type LucideIcon 
 export const money = (cents: number, currency = "ZAR") => new Intl.NumberFormat("en-ZA", { style: "currency", currency }).format(cents / 100);
 export const number = (value: number) => new Intl.NumberFormat("en-ZA").format(value);
 export const dateLabel = (value: string | null | undefined) => value ? new Intl.DateTimeFormat("en-ZA", { day: "numeric", month: "short", year: "numeric" }).format(new Date(value)) : "—";
-export const DialogError = createContext("");
+export const DialogError = createContext<ReactNode>("");
 
 export function titleCase(value: string) {
   const formatted = value.replace(/[-_]/g, " ");
@@ -48,7 +48,7 @@ export function Dialog({ title, children, onClose }: { title: string; children: 
   }, []);
   return <dialog ref={element} className="dialog" aria-labelledby="dialog-title" onCancel={(event) => { event.preventDefault(); onClose(); }}>
     <div className="dialog-head"><h2 id="dialog-title">{title}</h2><button type="button" className="icon-button" aria-label="Close dialog" onClick={onClose}><X size={21} /></button></div>
-    {error && <div className="notice notice-error dialog-error" role="alert"><CircleAlert size={16} />{error}</div>}
+    {typeof error === 'string' ? error && <div className="notice notice-error dialog-error" role="alert"><CircleAlert size={16} />{error}</div> : error}
     {children}
   </dialog>;
 }

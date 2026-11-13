@@ -6,6 +6,23 @@ export type Navigate = (view: View, selected?: string) => void;
 export type Result<T = unknown> = { state: MarketplaceState; data?: T };
 export type RunAction = <T = unknown>(action: string, values?: Record<string, unknown> | FormData, success?: string) => Promise<Result<T> | null>;
 
+export class WorkspaceReconnectError extends Error {
+  constructor() { super('Your workspace session needs to reconnect.'); }
+}
+
+export async function workspaceJson<T>(path: string, options: RequestInit = {}): Promise<{ response: Response; data: T & { error?: string } }> {
+  const headers = new Headers(options.headers);
+  headers.set('Accept', 'application/json');
+  headers.set('X-Requested-With', 'XMLHttpRequest');
+  const response = await fetch(path, { ...options, headers, credentials: 'same-origin', cache: 'no-store', redirect: 'manual' });
+  const json = response.headers.get('content-type')?.split(';')[0].trim().toLowerCase() === 'application/json';
+  if (response.type === 'opaqueredirect' || (response.status >= 300 && response.status < 400) ||
+      (!json && (response.status === 401 || response.status === 403))) throw new WorkspaceReconnectError();
+  if (!json) throw new Error('The workspace could not respond. Check your connection and try again.');
+  try { return { response, data: await response.json() }; }
+  catch { throw new Error('The workspace sent an incomplete response. Try again.'); }
+}
+
 export function companyOf(state: MarketplaceState, id: string | undefined): Company | undefined {
   return state.companies.find((company) => company.id === id);
 }
