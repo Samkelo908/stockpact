@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { Camera, Clipboard, Copy, QrCode, ScanLine, ShieldCheck, Truck } from "lucide-react";
+import { Camera, Clipboard, Clock, Copy, LockKeyhole, QrCode, ScanLine, ShieldCheck, Truck } from "lucide-react";
 import Image from "next/image";
 import QRCode from "qrcode";
 import type { DeliveryAuthorization, MarketplaceState } from "../shared/marketplace";
@@ -9,15 +9,26 @@ import { RedeemTestnetDelivery } from "../integrations/escrow/controls";
 import { type Navigate, type RunAction } from "./client";
 import { Busy, Dialog, Empty, PanelTitle, Tag, ViewTitle, dateLabel, money } from "./ui";
 
-export function QrDialog({ authorization, mode, onClose }: { authorization: DeliveryAuthorization; mode: "demo" | "testnet"; onClose: () => void }) {
+export function QrDialog({ authorization, mode, currency, tokenSymbol, onClose }: { authorization: DeliveryAuthorization; mode: "demo" | "testnet"; currency?: string; tokenSymbol?: string; onClose: () => void }) {
   const [image, setImage] = useState("");
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
+  const [clock, setClock] = useState(() => Date.now());
   const url = `${window.location.origin}${window.location.pathname}#deliveries/scan/${encodeURIComponent(authorization.token)}`;
+  const secondsLeft = Math.max(0, Math.ceil((Date.parse(authorization.expiresAt) - clock) / 1000));
+  const expired = secondsLeft === 0;
+  const countdown = `${Math.floor(secondsLeft / 60)}:${String(secondsLeft % 60).padStart(2, "0")}`;
+  const amount = mode === "demo" ? money(authorization.amountCents, currency) : `${(authorization.amountCents / 100).toFixed(2)} ${tokenSymbol ?? "test tokens"}`;
+
+  useEffect(() => {
+    if (expired) return;
+    const timer = window.setInterval(() => setClock(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [expired]);
 
   useEffect(() => {
     let active = true;
-    QRCode.toDataURL(url, { width: 250, margin: 3, color: { dark: "#10271f", light: "#ffffff" }, errorCorrectionLevel: "M" }).then((source) => { if (active) setImage(source); }).catch(() => { if (active) setError("QR could not render. Share the handover link below."); });
+    QRCode.toDataURL(url, { width: 288, margin: 4, color: { dark: "#211b17", light: "#ffffff" }, errorCorrectionLevel: "M" }).then((source) => { if (active) setImage(source); }).catch(() => { if (active) setError("QR could not render. Share the handover link below."); });
     return () => { active = false; };
   }, [url]);
 
@@ -26,15 +37,25 @@ export function QrDialog({ authorization, mode, onClose }: { authorization: Deli
     catch { setError("Select and copy the link from the field below."); }
   }
 
-  return <Dialog title="Delivery handover QR" onClose={onClose}><div className="qr-card">
-    {image ? <Image src={image} width={250} height={250} unoptimized alt="Scan to review the authorized delivery handover" /> : !error && <Busy label="Preparing QR code" />}
-    <Tag value={mode === "demo" ? "Demo payment" : "Testnet payment"} variant={mode === "demo" ? "amber" : "blue"} />
-    <strong>{authorization.quantity} accepted · {mode === "demo" ? money(authorization.amountCents) : `${(authorization.amountCents / 100).toFixed(2)} test tokens`}</strong>
-    <p className="small-note">Single use. Expires at {new Intl.DateTimeFormat("en-ZA", { timeStyle: "short" }).format(new Date(authorization.expiresAt))}. {mode === "testnet" ? "The signed-in supplier must review and accept with its linked wallet." : "A signed-in supplier or assigned driver must review and accept."}</p>
-    <label className="field qr-link">Handover link<input value={url} readOnly onFocus={(event) => event.currentTarget.select()} /></label>
-    <button type="button" className="secondary" onClick={() => void copy()}><Copy size={16} />{copied ? "Link copied" : "Copy handover link"}</button>
-    {error && <p role="status" className="notice notice-warn">{error}</p>}
-  </div></Dialog>;
+  return <Dialog title="Delivery handover QR" onClose={onClose}>
+    <div className="payment-qr">
+      <div className="payment-qr-ticket">
+        <span className="payment-mode">{mode === "demo" ? "Demo release" : "Testnet release"}</span>
+        <strong>{amount}</strong>
+        <p>{authorization.quantity} accepted</p>
+        {expired ? <p role="status">This handover QR has expired.</p> : <>
+          {image ? <Image src={image} width={288} height={288} unoptimized alt="Scan to review the authorized delivery handover" /> : !error && <Busy label="Preparing QR code" />}
+          <span className="payment-qr-expiry"><Clock size={14} /> Expires in {countdown} · Single use</span>
+        </>}
+      </div>
+      {!expired && <>
+        <p className="small-note">{mode === "testnet" ? "The supplier reviews and accepts with its linked wallet." : "The signed-in supplier or assigned driver reviews and accepts the release."}</p>
+        <label className="field qr-link">Handover link<input value={url} readOnly onFocus={(event) => event.currentTarget.select()} /></label>
+        <button type="button" className="secondary" onClick={() => void copy()}><Copy size={16} />{copied ? "Link copied" : "Copy handover link"}</button>
+        {error && <p role="status" className="notice notice-warn">{error}</p>}
+      </>}
+    </div>
+  </Dialog>;
 }
 
 function handoverToken(input: string) {
@@ -96,8 +117,10 @@ function CameraScanner({ onScan }: { onScan: (value: string) => void }) {
     return () => { closed = true; window.clearTimeout(timer); stream?.getTracks().forEach((track) => track.stop()); };
   }, [active]);
   return <div className="small-stack">
-    {active && <video ref={video} className="scan-video" autoPlay muted playsInline aria-label="Camera preview for QR scanning" />}
-    <div><button className="secondary" type="button" onClick={() => { setError(""); setActive((previous) => !previous); }}><Camera size={16} />{active ? "Stop camera" : "Scan with camera"}</button></div>
+    <div className="payment-scan-camera">
+      {active ? <video ref={video} className="scan-video" autoPlay muted playsInline aria-label="Camera preview for QR scanning" /> : <ScanLine size={28} aria-hidden="true" />}
+      <button className="secondary" type="button" onClick={() => { setError(""); setActive((previous) => !previous); }}><Camera size={16} />{active ? "Stop camera" : "Scan with camera"}</button>
+    </div>
     {error && <p role="status" className="notice notice-warn">{error}</p>}
   </div>;
 }
@@ -132,13 +155,15 @@ function Redeem({ initial, state, busy, run, navigate }: { initial: string; stat
   const order = state.orders.find((item) => item.id === authorization?.orderId);
   const testnet = (order?.paymentMode ?? state.escrow.mode) === "testnet";
 
-  return <section className="card panel stack">
+  return <section className="card panel stack payment-scan-panel">
     <PanelTitle title="Review a handover" subtitle="Scan the buyer’s QR or paste the link. A review is required before accepting payment." />
     <CameraScanner onScan={(value) => { setInput(value); void inspect(value); }} />
     <form className="small-stack" onSubmit={submit}><label className="field">Handover link or code<input value={input} onChange={(event) => { setInput(event.currentTarget.value); setAuthorization(null); }} autoCapitalize="none" autoCorrect="off" maxLength={800} required placeholder="Paste a link or authorisation code" /></label><div><button type="submit" className="primary" disabled={!!busy}><Clipboard size={16} />Review handover</button></div></form>
     {busy === "inspectDelivery" && <Busy label="Checking handover authorisation" />}
     {error && <p role="alert" className="notice notice-error">{error}</p>}
-    {authorization && <article className="subcard stack"><div className="split-line"><h3>Handover authorisation</h3><Tag value={authorization.status} /></div><dl className="details-grid"><div><dt>Accepted quantity</dt><dd>{authorization.quantity}</dd></div><div><dt>{testnet ? "Testnet payment" : "Demo payment"}</dt><dd>{testnet ? `${(authorization.amountCents / 100).toFixed(2)} test tokens` : money(authorization.amountCents)}</dd></div></dl>
+    {authorization && <article className="subcard stack"><div className="split-line"><h3>Handover authorisation</h3><Tag value={authorization.status} /></div>
+      <div className="payment-checkout-total"><div><span>{testnet ? "Testnet release" : "Demo release"}</span><strong>{testnet ? `${(authorization.amountCents / 100).toFixed(2)} ${state.escrow.mode === "testnet" ? state.escrow.tokenSymbol : "test tokens"}` : money(authorization.amountCents, order?.currency)}</strong></div><LockKeyhole size={24} /></div>
+      <dl className="payment-breakdown"><div><dt>Accepted quantity</dt><dd>{authorization.quantity}{order?.unit ? ` ${order.unit}` : ""}</dd></div>{order && <div><dt>Order</dt><dd>{order.reference}</dd></div>}</dl>
       {testnet && <RedeemTestnetDelivery state={state} inspection={authorization} token={authorization.token} run={run} busy={busy} onRedeemed={() => navigate("orders", authorization.orderId)} />}
       {authorization.status === "active" && !testnet && <><label className="check"><input type="checkbox" checked={simulateInterruption} onChange={(event) => setSimulateInterruption(event.currentTarget.checked)} />Simulate a payment interruption</label><button className="primary" type="button" disabled={!!busy} onClick={() => void redeem()}><ShieldCheck size={16} />Accept handover and record demo payment</button></>}
     </article>}

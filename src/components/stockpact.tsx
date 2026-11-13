@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
-import { ArrowRight, Bell, Boxes, Building2, ChevronDown, ChevronRight, CircleAlert, CircleCheck, ClipboardList, House, LogOut, Menu, Package, PackageCheck, Search, Settings, ShieldCheck, Sparkles, Star, Store, Truck, Wallet, X, type LucideIcon } from "lucide-react";
+import { ArrowRight, Banknote, Bell, Boxes, Building2, ChevronDown, ChevronRight, CircleAlert, CircleCheck, ClipboardList, House, LogOut, Menu, Package, PackageCheck, Search, Settings, ShieldCheck, Star, Store, Truck, X, type LucideIcon } from "lucide-react";
 import type { MarketplaceState, RequestDraft } from "../shared/marketplace";
 import { companyOf, initials, views, type Navigate, type Result, type RunAction, type View } from "./client";
 import { Assistant, Dashboard } from "./purchasing";
@@ -14,13 +14,13 @@ import { Busy, Dialog, DialogError, Empty, Tag, dateLabel, titleCase } from "./u
 
 const nav: { id: View; title: string; short: string; icon: LucideIcon; group: "Workspace" | "Operations" | "Account" }[] = [
   { id: "home", title: "Overview", short: "Home", icon: House, group: "Workspace" },
-  { id: "assistant", title: "AI purchasing", short: "AI", icon: Sparkles, group: "Workspace" },
+  { id: "assistant", title: "Source stock", short: "Source", icon: Search, group: "Workspace" },
   { id: "marketplace", title: "Marketplace", short: "Market", icon: Store, group: "Workspace" },
   { id: "requests", title: "Requests & quotes", short: "Requests", icon: ClipboardList, group: "Workspace" },
   { id: "orders", title: "Orders", short: "Orders", icon: PackageCheck, group: "Workspace" },
   { id: "inventory", title: "Inventory", short: "Stock", icon: Package, group: "Operations" },
   { id: "deliveries", title: "Deliveries", short: "Delivery", icon: Truck, group: "Operations" },
-  { id: "funds", title: "Funds", short: "Funds", icon: Wallet, group: "Operations" },
+  { id: "funds", title: "Payments", short: "Payments", icon: Banknote, group: "Operations" },
   { id: "reviews", title: "Suppliers & reviews", short: "Reviews", icon: Star, group: "Operations" },
   { id: "settings", title: "Company settings", short: "Settings", icon: Settings, group: "Account" },
   { id: "admin", title: "Administration", short: "Admin", icon: ShieldCheck, group: "Account" },
@@ -130,7 +130,8 @@ export function StockPact() {
 
   if (!state) return <main className="auth-screen"><section className="card auth-card stack"><Brand />{loadError ? <><p role="alert" className="notice notice-error"><CircleAlert size={17} />{loadError}</p><div><button className="primary" type="button" onClick={() => void refresh()}>Try again</button></div></> : <Busy label="Opening your procurement workspace" />}</section></main>;
 
-  if (!state.actor || (typeof window !== "undefined" && new URLSearchParams(window.location.search).has("token"))) return <AuthScreen state={state} busy={busy} run={run} notice={showNotice} />;
+  const authParams = new URLSearchParams(typeof window === "undefined" ? "" : window.location.search);
+  if (!state.actor || authParams.has("token") || (authParams.has("reset") && authParams.get("error") === "INVALID_TOKEN")) return <AuthScreen state={state} busy={busy} run={run} notice={showNotice} />;
 
   const actor = state.actor;
   const company = companyOf(state, actor.companyId);
@@ -183,17 +184,17 @@ export function StockPact() {
         {current && <>{route.view === "home" && <Dashboard {...composer} />}
         {route.view === "assistant" && <Assistant {...composer} run={run} />}
         {route.view === "marketplace" && <Marketplace {...common} query={marketQuery} setQuery={setMarketQuery} startDraft={startDraft} />}
-        {route.view === "requests" && <Requests {...common} />}
+        {route.view === "requests" && <Requests {...common} startDraft={startDraft} />}
         {route.view === "orders" && <Orders {...common} startDraft={startDraft} />}
         {route.view === "inventory" && <Inventory {...common} />}
         {route.view === "deliveries" && <Deliveries {...common} />}
-        {route.view === "funds" && <Funds state={state} navigate={navigate} />}
+        {route.view === "funds" && <Funds state={state} navigate={navigate} busy={busy} run={run} />}
         {route.view === "reviews" && <Reviews {...common} startDraft={startDraft} />}
         {route.view === "settings" && <SettingsView key={actor.companyId} {...common} />}
         {route.view === "admin" && <Admin {...common} />}</>}
       </main>
     </div>
-    <nav className="bottom-nav" aria-label="Mobile navigation">{links.filter((item) => (actor.role === "driver" ? ["home", "orders", "deliveries"] : actor.role === "reviewer" ? ["home", "orders", "admin"] : ["home", "assistant", "marketplace", "orders"]).includes(item.id)).map(({ id, short, icon: Icon }) => <button key={id} type="button" aria-current={route.view === id ? "page" : undefined} onClick={() => navigate(id)}><Icon size={19} />{short}</button>)}<button type="button" onClick={() => setDialog("more")}><Menu size={20} />More</button></nav>
+    <nav className="bottom-nav" aria-label="Mobile navigation">{links.filter((item) => (actor.role === "driver" ? ["home", "orders", "deliveries"] : actor.role === "reviewer" ? ["home", "orders", "admin"] : ["home", "marketplace", "orders", "funds"]).includes(item.id)).map(({ id, short, icon: Icon }) => <button key={id} type="button" aria-current={route.view === id ? "page" : undefined} onClick={() => navigate(id)}><Icon size={19} />{short}</button>)}<button type="button" onClick={() => setDialog("more")}><Menu size={20} />More</button></nav>
     {dialog === "more" && <Dialog title="Workspace navigation" onClose={() => setDialog(null)}><div className="small-stack">{links.map(({ id, title, icon: Icon }) => <button type="button" key={id} className="list-button" onClick={() => navigate(id)}><Icon size={17} /><div><strong>{title}</strong></div><ChevronRight size={15} /></button>)}</div></Dialog>}
     {dialog === "search" && <Dialog title="Search marketplace" onClose={() => setDialog(null)}><form className="stack" onSubmit={openMarket}><label className="field">Product, category or supplier<input type="search" autoFocus value={query} onChange={(event) => setQuery(event.currentTarget.value)} placeholder="Search products" /></label><div><button className="primary" type="submit"><Search size={16} />Search marketplace</button></div></form></Dialog>}
     {dialog === "profile" && <Dialog title="Account & workspace" onClose={() => setDialog(null)}><div className="stack">
@@ -212,8 +213,15 @@ export function StockPact() {
 
 function AuthScreen({ state, busy, run, notice }: { state: MarketplaceState; busy: string; run: RunAction; notice: React.ReactNode }) {
   const params = new URLSearchParams(typeof window === "undefined" ? "" : window.location.search);
-  const [mode, setMode] = useState<"signIn" | "register" | "recovery" | "reset">(params.has("token") ? "reset" : "signIn");
-  const [status, setStatus] = useState<{ error: boolean; text: string } | null>(null);
+  const invalidReset = params.has("reset") && params.get("error") === "INVALID_TOKEN";
+  const [mode, setMode] = useState<"signIn" | "register" | "recovery" | "reset">(params.has("token") ? "reset" : invalidReset ? "recovery" : "signIn");
+  const [status, setStatus] = useState<{ error: boolean; text: string } | null>(invalidReset ? { error: true, text: "This reset link has expired or was already used. Request a new link." } : null);
+
+  function clearRecoveryLink() {
+    for (const name of ["token", "reset", "error"]) params.delete(name);
+    const query = params.toString();
+    window.history.replaceState(null, "", `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`);
+  }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -224,7 +232,7 @@ function AuthScreen({ state, busy, run, notice }: { state: MarketplaceState; bus
     const result = await run<{ message: string }>(resetting ? "resetPassword" : "requestPasswordReset", resetting ? { password: values.password, token: params.get("token") } : { email: values.email });
     if (result?.data) setStatus({ error: false, text: result.data.message });
     if (resetting && result) {
-      window.history.replaceState(null, "", `${window.location.pathname}${window.location.hash}`);
+      clearRecoveryLink();
       setMode("signIn");
     }
   }
@@ -240,7 +248,7 @@ function AuthScreen({ state, busy, run, notice }: { state: MarketplaceState; bus
       {mode !== "recovery" && <label className="field">Password<input type="password" name="password" minLength={10} autoComplete={mode === "signIn" ? "current-password" : "new-password"} required /></label>}
       <button type="submit" className="primary" disabled={!!busy}>{mode === "register" ? "Create workspace" : mode === "recovery" ? "Request reset link" : mode === "reset" ? "Update password" : "Sign in"}<ArrowRight size={16} /></button>
     </form>
-    <div className="button-row"><button type="button" className="secondary" onClick={() => { setStatus(null); setMode(mode === "signIn" ? "register" : "signIn"); }}>{mode === "signIn" ? "Register a business" : "Back to sign-in"}</button>{mode === "signIn" && <button type="button" className="secondary" onClick={() => { setStatus(null); setMode("recovery"); }}>Forgot password</button>}</div>
-    {state.demo && !!state.roles.length && <button type="button" className="secondary" disabled={!!busy} onClick={() => void run("switchRole", { role: "buyer" })}><Sparkles size={16} />Open fictional demo</button>}
+    <div className="button-row"><button type="button" className="secondary" onClick={() => { if (mode === "reset" || invalidReset) clearRecoveryLink(); setStatus(null); setMode(mode === "signIn" ? "register" : "signIn"); }}>{mode === "signIn" ? "Register a business" : "Back to sign-in"}</button>{mode === "signIn" && <button type="button" className="secondary" onClick={() => { setStatus(null); setMode("recovery"); }}>Forgot password</button>}</div>
+    {mode !== "reset" && !invalidReset && state.demo && !!state.roles.length && <button type="button" className="secondary" disabled={!!busy} onClick={() => void run("switchRole", { role: "buyer" })}><Boxes size={16} />Open fictional demo</button>}
   </section></main>;
 }

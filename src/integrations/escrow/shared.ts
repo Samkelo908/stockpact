@@ -12,7 +12,7 @@ export type EscrowConfiguration = {
   confirmations: number;
 };
 
-export type EscrowStatus = { mode: 'demo' } | EscrowConfiguration;
+export type EscrowStatus = { mode: 'demo' | 'disabled' } | EscrowConfiguration;
 
 export type WalletProof = {
   address: string;
@@ -52,6 +52,7 @@ export const escrowAbi = parseAbi([
   'function token() view returns (address)',
   'function unitsPerCent() view returns (uint256)',
   'function attestor() view returns (address)',
+  'function unavailableNonces(bytes32 orderId, bytes32 nonce) view returns (bool)',
   'function orders(bytes32 orderId) view returns (address buyer, address supplier, address driver, uint64 quantity, uint64 acceptedQuantity, uint64 refundAvailableAt, uint64 disputedAt, uint256 funded, uint256 released, uint256 refunded, bool closed)',
   'event Funded(bytes32 indexed orderId, address indexed buyer, address indexed supplier, uint256 amount, uint64 quantity)',
   'event Released(bytes32 indexed orderId, bytes32 indexed nonce, address indexed supplier, address submittedBy, uint64 previousQuantity, uint64 quantity, uint256 amount)',

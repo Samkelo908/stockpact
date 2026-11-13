@@ -3,6 +3,7 @@ import { sql } from 'kysely';
 import { z } from 'zod';
 import { escrowStatus, verifyWalletProof, type WalletProof } from '../integrations/escrow/server';
 import { walletAddress } from '../integrations/escrow/shared';
+import { verificationProvider } from '../integrations/verification';
 import { initialMarket, type Actor, type Company, type Listing, type Notice, type ShoppingList, type VerificationCheck } from '../shared/marketplace';
 import { actorCompany, audit, MarketplaceError, requireFound, requireRole } from './access';
 import { record, records, save, tables, update, type DbSession } from './db';
@@ -23,14 +24,19 @@ export async function updateCompany(db: DbSession, actor: Actor, input: unknown)
   if (fields.country !== initialMarket.country || (fields.currency && fields.currency !== initialMarket.currency)) {
     throw new MarketplaceError('This marketplace currently supports South African companies and rand quotations.', 422);
   }
-  const updated: Company = { ...company, ...fields, verification: { ...company.verification }, capabilities: [...new Set(fields.capabilities)] };
+  const verificationReviewIds = { ...company.verificationReviewIds };
+  const updated: Company = { ...company, ...fields, verification: { ...company.verification },
+    verificationReviewIds, capabilities: [...new Set(fields.capabilities)] };
   if (!company.demo) {
     const identityChanged = company.legalName !== fields.legalName || company.registrationNumber !== fields.registrationNumber ||
       company.country !== fields.country || company.location !== fields.location;
     const scopes: VerificationCheck['scope'][] = identityChanged ? ['business', 'representative', 'delivery']
       : company.representative !== fields.representative ? ['representative'] : [];
     if (scopes.length) {
-      for (const scope of scopes) updated.verification[scope] = 'unsubmitted';
+      for (const scope of scopes) {
+        updated.verification[scope] = 'unsubmitted';
+        delete verificationReviewIds[scope];
+      }
       updated.verificationNote = undefined;
       await sql`delete from persona_inquiries where company_id = ${company.id} and scope in (${sql.join(scopes)})`.execute(db);
     }
@@ -47,12 +53,18 @@ export async function submitVerification(db: DbSession, actor: Actor) {
     throw new MarketplaceError('Complete the company registration, address and representative fields first.', 422);
   }
   const verification = { ...company.verification };
+  const verificationReviewIds = { ...company.verificationReviewIds };
+  const provider = verificationProvider();
   const applicable: VerificationCheck['scope'][] = ['business', 'representative'];
   if (company.capabilities.includes('delivery')) applicable.push('delivery');
-  const scopes = applicable.filter((scope) => company.demo || !['verified', 'pending'].includes(verification[scope]));
-  if (!scopes.length) throw new MarketplaceError('All applicable checks are approved or already under review.', 409);
-  for (const scope of scopes) verification[scope] = 'pending';
-  const updated = { ...company, verification, verificationNote: undefined };
+  const scopes = applicable.filter((scope) => company.demo || (!['verified', 'pending'].includes(verification[scope]) &&
+    (!provider || provider.sandbox || !provider.scopes.includes(scope))));
+  if (!scopes.length) throw new MarketplaceError('There are no checks to submit for manual review.', 409);
+  for (const scope of scopes) {
+    verification[scope] = 'pending';
+    verificationReviewIds[scope] = randomUUID();
+  }
+  const updated = { ...company, verification, verificationReviewIds, verificationNote: undefined };
   await update(db, tables.companies, company.id, updated);
   for (const scope of scopes) await recordVerification(db, { actorId: actor.id, companyId: company.id, scope, status: 'pending', provider: company.demo ? 'demo' : 'manual' });
   await audit(db, actor, 'submit_verification', company.id);
@@ -61,12 +73,31 @@ export async function submitVerification(db: DbSession, actor: Actor) {
 
 export async function reviewVerification(db: DbSession, actor: Actor, input: unknown) {
   requireRole(actor, 'reviewer');
-  const { companyId, scope, status, note } = parse(z.object({ companyId: id,
+  const { companyId, scope, status, note, reviewId } = parse(z.object({ companyId: id,
     scope: z.enum(['business', 'representative', 'delivery']), status: z.enum(['pending', 'action_required', 'verified', 'rejected', 'expired']),
     note: z.string().trim().max(1600).default(''),
+    reviewId: z.uuid().optional(),
   }), input);
   const company = requireFound((await records<Company>(db, tables.companies, sql`id = ${companyId} and demo = ${Boolean(actor.demoRole)}`))[0]);
-  if (company.id === actor.companyId) throw new MarketplaceError('Reviewers cannot verify their own company.', 403);
+  if (company.id === actor.companyId || actor.memberships.some((membership) => membership.companyId === company.id)) {
+    throw new MarketplaceError('Reviewers cannot verify a company they belong to.', 403);
+  }
+  if (!company.demo) {
+    if (!reviewId || company.verificationReviewIds?.[scope] !== reviewId ||
+        !['pending', 'action_required'].includes(company.verification[scope]) ||
+        (scope === 'delivery' && !company.capabilities.includes('delivery'))) {
+      throw new MarketplaceError('This submission changed. Close the review and open the latest submission.', 409);
+    }
+    if (status === 'verified') {
+      const inquiry = (await sql<{ attempt_id: string; status: string }>`select attempt_id, status from persona_inquiries
+        where company_id = ${companyId} and scope = ${scope} and sandbox = false`.execute(db)).rows[0];
+      const provider = verificationProvider();
+      const hostedRequired = provider && !provider.sandbox && provider.scopes.includes(scope);
+      if ((inquiry || hostedRequired) && (inquiry?.attempt_id !== reviewId || inquiry?.status !== 'verified')) {
+        throw new MarketplaceError('The current Persona inquiry must be approved before you can verify this submission.', 409);
+      }
+    }
+  }
   const updated = { ...company, verification: { ...company.verification, [scope]: status }, verificationNote: note };
   await update(db, tables.companies, company.id, updated);
   await recordVerification(db, { actorId: actor.id, companyId, scope, status, note, provider: company.demo ? 'demo' : 'manual' });

@@ -148,6 +148,7 @@ test("registers a separate company and restores its session on sign-in", async (
 
 test("fits a phone, supports keyboard focus and shows search progress while waiting", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "phone", "This check uses the mobile viewport.");
+  await page.emulateMedia({ reducedMotion: "no-preference" });
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Procurement overview" })).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("phone-overview.png"), animations: "disabled" });
@@ -155,16 +156,84 @@ test("fits a phone, supports keyboard focus and shows search progress while wait
   await page.keyboard.press("Tab");
   expect(await page.evaluate(() => document.activeElement !== document.body)).toBeTruthy();
   const delivery = new Date(Date.now() + 8 * 86400000).toISOString().slice(0, 10);
-  await page.getByLabel("Describe your requirement").fill("I need 20 cases of still water delivered to Cape Town by " + delivery);
+  await page.getByLabel("Describe your requirement").fill("I need 20 cases of still water delivered to Cape Town.");
   await page.getByRole("button", { name: "Build request" }).click();
   await expect(page.getByLabel("Product and specification")).toBeVisible();
-  await page.route("**/api/actions", async (route) => {
-    if (route.request().postDataJSON().action !== "matchRequest") return route.continue();
-    await expect(page.getByRole("status").filter({ hasText: "Finding matching suppliers" })).toBeInViewport();
-    await page.screenshot({ path: testInfo.outputPath("phone-search.png"), animations: "disabled" });
-    await route.continue();
+  await expect(page.getByRole("status").filter({ hasText: "Request ready to review" })).toBeInViewport();
+  const requiredDateHint = page.getByText("Fill in the required date to start the supplier search.");
+  await expect(requiredDateHint).toBeVisible();
+  await page.getByLabel("Required by").fill(delivery);
+  await expect(requiredDateHint).toHaveCount(0);
+  const motion = page.waitForFunction(() => {
+    const status = document.querySelector('.search-progress[data-state="complete"]');
+    if (!status?.textContent?.includes("Supplier search complete")) return false;
+    const track = status.querySelector(".search-progress-track");
+    return track?.getAnimations({ subtree: true }).some((animation) => animation.playState === "running");
   });
   await page.getByRole("button", { name: "Find suppliers" }).click();
-  await expect(page.getByRole("heading", { name: "Matching suppliers" })).toBeVisible();
+  await motion;
+  await expect(page.getByRole("status").filter({ hasText: "Supplier search complete" })).toBeInViewport();
+  await page.getByRole("button", { name: "Review suppliers" }).click();
+  await expect(page.getByRole("region", { name: "Matching suppliers" })).toBeFocused();
+  await expect(page.getByRole("heading", { name: "Matching suppliers" })).toBeInViewport();
   await expect(page.getByRole("status").filter({ hasText: "Finding matching suppliers" })).toHaveCount(0);
+
+  await page.getByRole("button", { name: "New request" }).click();
+  await page.getByRole("button", { name: "Use guided form" }).click();
+  await page.getByLabel("Product and specification").fill("Acoustic booth cushions");
+  await page.getByLabel("Required by").fill(delivery);
+  await page.getByRole("button", { name: "Find suppliers" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "No suppliers matched this request" })).toBeInViewport();
+  await page.getByRole("button", { name: "Adjust and search again" }).click();
+  await expect(page.getByLabel("Product and specification")).toHaveValue("Acoustic booth cushions");
+  await expect(page.getByLabel("Required by")).toHaveValue(delivery);
+});
+
+test("reviews and reserves a payment from the phone, then finds and downloads the receipt", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "phone", "This check uses the mobile payment navigation.");
+  await page.goto("/#requests/demo-request-sent");
+  await page.getByRole("button", { name: "Review & accept" }).first().click();
+  await page.getByRole("button", { name: "Accept quote", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Orders", exact: true })).toBeVisible();
+  const orderId = decodeURIComponent(new URL(page.url()).hash.split("/")[1]);
+  const state = await (await page.request.get("/api/state")).json();
+  const order = state.orders.find((entry: { id: string }) => entry.id === orderId);
+  expect(order.status).toBe("awaiting_funding");
+
+  await page.getByRole("navigation", { name: "Mobile navigation" }).getByRole("button", { name: "Payments" }).click();
+  await expect(page.getByRole("heading", { name: "Payments", exact: true })).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("phone-payments.png"), animations: "disabled" });
+  await page.getByRole("button", { name: "Review payment" }).click();
+  const checkout = page.getByRole("dialog", { name: "Review escrow payment" });
+  await expect(checkout.getByText("Simulated payment")).toBeVisible();
+  await expect(checkout.getByText(order.reference, { exact: false })).toBeVisible();
+  await expect(checkout.getByText("Quoted total", { exact: true })).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("phone-checkout.png"), animations: "disabled" });
+  await page.setViewportSize({ width: 320, height: 740 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+  await checkout.getByRole("button", { name: "Confirm demo reserve" }).click();
+  await expect(checkout).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Review payment" })).toHaveCount(0);
+
+  await page.getByRole("searchbox", { name: "Search transactions" }).fill(order.reference);
+  const transactions = page.getByRole("list", { name: "Transactions" });
+  await expect(transactions.getByRole("listitem")).toHaveCount(1);
+  const receipt = transactions.getByRole("button", { name: /download.*receipt/i });
+  const download = page.waitForEvent("download");
+  await receipt.click();
+  expect((await download).suggestedFilename()).toContain(order.reference);
+});
+
+test("finds a South African supplier by name and carries its listing into a request", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "The desktop project verifies marketplace search.");
+  await page.goto("/#marketplace");
+  await expect(page.getByRole("heading", { name: "Marketplace", exact: true })).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("desktop-marketplace.png"), animations: "disabled" });
+  await page.getByRole("searchbox", { name: "Search listings" }).fill("water Peninsula Wholesale");
+  await page.getByRole("combobox", { name: "Delivery area" }).selectOption("Epping");
+  await expect(page.getByRole("status").filter({ hasText: /^1 listing$/ })).toBeVisible();
+  await page.getByRole("button", { name: "View listing" }).click();
+  await page.getByRole("button", { name: "Request current pricing" }).click();
+  await expect(page.getByLabel("Product and specification")).toHaveValue("500 ml still water");
+  await expect(page.getByLabel("Units per pack")).toHaveValue("24");
 });

@@ -1,18 +1,38 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import { ArrowRight, CalendarDays, Check, ClipboardList, FileCheck2, MessageSquare, Search, Send, ShieldCheck, Store } from "lucide-react";
-import type { MarketplaceState, Order, PurchaseRequest, Quote } from "../shared/marketplace";
+import { ArrowDown, ArrowRight, CalendarDays, Check, ClipboardList, FileCheck2, MessageSquare, Search, Send, ShieldCheck, Store } from "lucide-react";
+import type { MarketplaceState, Order, PurchaseRequest, Quote, RequestDraft } from "../shared/marketplace";
 import { cents, companyName, companyOf, type Navigate, type RunAction } from "./client";
 import { SearchProgress } from "./purchasing";
 import { Dialog, Empty, PanelTitle, Tag, ViewTitle, dateLabel, money, number } from "./ui";
 
-export function Requests({ state, selected, busy, run, navigate }: { state: MarketplaceState; selected: string; busy: string; run: RunAction; navigate: Navigate }) {
+export function Requests({ state, selected, busy, run, navigate, startDraft }: { state: MarketplaceState; selected: string; busy: string; run: RunAction; navigate: Navigate; startDraft: (draft: RequestDraft) => void }) {
   const request = state.requests.find((item) => item.id === selected) ?? state.requests[0];
   const canBuy = companyOf(state, state.actor?.companyId)?.capabilities.includes("buyer") && ["owner", "purchaser"].includes(state.actor?.role ?? "");
+  const searching = request?.status === "matching" || busy === "matchRequest";
+  const matchCount = request?.matches.length ?? 0;
   return <>
     <ViewTitle title="Requests & quotes" subtitle="Track supplier invitations and compare the terms you receive." action={canBuy ? <button className="primary" type="button" onClick={() => navigate("assistant")}><ClipboardList size={16} />New request</button> : undefined} />
-    {(request?.status === "matching" || busy === "matchRequest") && <div className="page-progress"><SearchProgress title="Finding matching suppliers" detail="Checking the catalogue, quantities, delivery coverage and required date." /></div>}
+    {searching && <SearchProgress title="Finding matching suppliers" detail="Checking stock, quantities, delivery coverage and your required date." />}
+    {!searching && request?.status === "matched" && (
+      <SearchProgress key={request.id} complete title="Supplier search complete"
+        detail={matchCount ? number(matchCount) + (matchCount === 1 ? " matching supplier ready to review." : " matching suppliers ready to review.") : "No suppliers matched this request."}
+        action={request.buyerId === state.actor?.companyId && (matchCount > 0 ? (
+            <button type="button" className="primary" aria-controls="matching-suppliers" onClick={() => {
+              const matches = document.getElementById("matching-suppliers");
+              matches?.focus({ preventScroll: true });
+              matches?.scrollIntoView({ block: "start" });
+            }}>
+              Review suppliers<ArrowDown size={16} aria-hidden="true" />
+            </button>
+          ) : canBuy && (
+            <button type="button" className="primary" onClick={() => startDraft({ ...request.draft, mode: "manual" })}>
+              Adjust and search again<ArrowRight size={16} aria-hidden="true" />
+            </button>
+          ))}
+      />
+    )}
     <div className="workspace-grid">
       <section className="card panel small-stack workspace-selector">
         <PanelTitle title="Purchase requests" subtitle={`${number(state.requests.length)} in this workspace`} />
@@ -65,9 +85,9 @@ function RequestDetails({ state, request, busy, run, navigate }: { state: Market
       {buyerCanAct && request.status === "draft" && <div><button className="primary" type="button" disabled={!!busy} onClick={() => void run("matchRequest", { requestId: request.id })}><Search size={16} />Find matching suppliers</button></div>}
       {supplier && request.status === "sent" && (supplierResponse?.status === "declined" ? <p className="notice notice-warn">Your company declined this request.</p> : <div className="button-row"><button className="primary" type="button" disabled={!!busy} onClick={() => setQuoteOpen(true)}><FileCheck2 size={16} />{quotes.length ? "Revise quote" : "Prepare quote"}</button><button className="secondary" type="button" disabled={!!busy} onClick={() => setReply("ask")}><MessageSquare size={15} />Ask a question</button><button className="secondary" type="button" disabled={!!busy} onClick={() => setReply("decline")}>Decline request</button></div>)}
     </section>
-    {buyer && request.status === "matched" && <section className="card panel stack">
+    {buyer && request.status === "matched" && <section id="matching-suppliers" tabIndex={-1} aria-label="Matching suppliers" className="card panel stack">
       <PanelTitle title="Matching suppliers" subtitle="Review the matches and choose which suppliers should receive your request." />
-      {matches.length === 0 && <Empty title="No suitable suppliers found" detail="Review product wording, availability or the delivery location, then try a new search." icon={Store} action={<button className="secondary" type="button" onClick={() => navigate("assistant")}>Open purchasing workspace</button>} />}
+      {matches.length === 0 && <Empty title="No suitable suppliers found" detail="Try adjusting the product, quantity or delivery area." icon={Store} />}
       {matches.map((match) => {
         const supplierCompany = companyOf(state, match.supplierId);
         const listing = state.listings.find((item) => item.id === match.listingId);

@@ -42,6 +42,7 @@ export interface Company {
   representative?: string;
   capabilities: Capability[];
   verification: { business: VerificationStatus; representative: VerificationStatus; delivery: VerificationStatus };
+  verificationReviewIds?: Partial<Record<VerificationScope, string>>;
   verificationNote?: string;
   approvalThresholdCents?: number | null;
   demo: boolean;

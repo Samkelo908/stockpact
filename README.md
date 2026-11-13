@@ -22,26 +22,30 @@ To use a production build for a local demo, copy [the environment example](.env.
 1. Open the purchasing assistant. Try “I need 20 cases of still bottled water delivered to Woodstock, Cape Town by Friday.” Review the editable draft and set a future date if needed.
 2. Find suppliers. The progress indicator follows the matching request. Select the suppliers to invite and send the RFQ.
 3. Switch to each invited supplier to submit a different delivered price. Return to the buyer to compare the quotes and accept a version. The accepted quote reserves stock.
-4. Open the order and fund the labelled demo escrow. Switch to the winning supplier and dispatch.
+4. Open **Payments**, review the approved order and its rand breakdown, then confirm the labelled demo reserve. Switch to the winning supplier and dispatch.
 5. Return to the buyer, enter 12 accepted cases, review the exact release, and generate the handover QR. Scan it from the supplier account or paste the token into the scanner. Review the release and confirm. A second attempt with the same token is rejected.
 6. Repeat for the remaining eight cases. Download the order summary or settlement receipt, leave the order-linked review, and use **Buy again** to draft a fresh request.
 7. Use the seeded dispute to demonstrate reviewer access and the distinction between released and outstanding funds.
 
 Demo settlement updates the database. It does not produce a blockchain transaction. Follow the [contract setup](contracts/README.md) to demonstrate live testnet settlement.
 
-## Setup for external services
+## Run a private workspace
+
+Create a fresh PostgreSQL database and copy `.env.example` to `.env.local`. Set `STOCKPACT_DEMO=false`, `STOCKPACT_ESCROW_MODE=disabled`, and the database and authentication values below. Run `npm run build` followed by `npm start`. StockPact starts at its business sign-in screen and creates tables on the first database connection. Register each buyer and supplier separately. The local server listens on loopback. Use a private HTTPS reverse proxy and set `BETTER_AUTH_URL` to its origin if other devices need access.
+
+Activate each service as its credentials become available. Escrow on a configured test network uses test tokens.
 
 | Service | Configuration |
 | --- | --- |
 | Database and auth | Set `STOCKPACT_DEMO=false`, `DATABASE_URL`, `BETTER_AUTH_URL` and a unique `BETTER_AUTH_SECRET` of at least 32 characters. Use a private PostgreSQL database. The app applies SQL migrations on startup. |
 | Cloudflare Workers AI | Create an account-scoped Workers AI API token and set `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN`. The text adapter validates structured output and identifies deterministic fallback in the draft. The transcription endpoint accepts short audio recordings. [Workers AI REST API](https://developers.cloudflare.com/workers-ai/get-started/rest-api/) |
-| Private file storage | Create a private R2 bucket with object read/write access scoped to that bucket. Set the four `STOCKPACT_R2_*` values. Local demo attachments use a private directory when R2 is absent. [R2 credentials](https://developers.cloudflare.com/r2/api/tokens/) |
+| Private file storage | For a single private instance with persistent disk, set `STOCKPACT_STORAGE_MODE=local` and `STOCKPACT_FILE_PATH` to a private directory. For shared storage, create a private R2 bucket, leave `STOCKPACT_STORAGE_MODE` unset, and set the four `STOCKPACT_R2_*` values with credentials scoped to that bucket. [R2 credentials](https://developers.cloudflare.com/r2/api/tokens/) |
 | Matching jobs | Set `STOCKPACT_JOBS_SECRET` and configure a private scheduler to call `POST /api/jobs` with `Authorization: Bearer <secret>`. Pending jobs are stored in PostgreSQL. |
 | Password recovery | Configure the server-side `STOCKPACT_EMAIL_WEBHOOK` and optional bearer secret. The endpoint must deliver recovery messages over a trusted mail service. |
 | Business verification | Configure a Persona key, webhook secret, and South Africa-appropriate inquiry templates for the desired scopes. Point Persona's signed inquiry-event webhook at `/api/verification/webhook`. Applicants complete hosted capture in Persona. A platform reviewer matches approved production inquiries to the submitted company record before granting verified status. Sandbox results stay in check history. The manual workflow is available without Persona. [Persona Hosted Flow](https://docs.withpersona.com/hosted-flow) |
-| Escrow | Follow the [testnet instructions](contracts/README.md), deploy the escrow and token, configure the testnet RPC and contracts, and connect separate buyer and supplier wallets. |
+| Escrow | Use `STOCKPACT_ESCROW_MODE=disabled` while setting up procurement. To enable payments, follow the [testnet instructions](contracts/README.md), deploy the escrow and token, configure the testnet RPC and contracts, and connect separate buyer and supplier wallets. |
 
-External credentials stay server-side. Keep `.env.local`, the local database and business attachments outside Git. For manual or hosted verification outside the demo, provision a trusted reviewer using a `reviewer` membership in your private PostgreSQL instance. Reviewer permissions include access to verification and dispute queues across the active environment.
+External credentials stay server-side. Keep `.env.local`, the local database and business attachments outside Git. For manual or hosted verification outside the demo, ask the trusted reviewer to register an account, confirm their identity, then run `npm run reviewer:grant -- reviewer@example.com` against the intended database. The reviewer can select the **StockPact platform** workspace to access verification and dispute queues across that environment. Ask the reviewer to check the submitted company details against the supporting evidence before approving a scope. A configured production Persona scope requires an approved current inquiry.
 
 ## Architecture
 

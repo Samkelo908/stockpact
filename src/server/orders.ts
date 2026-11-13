@@ -3,7 +3,7 @@ import { sql } from 'kysely';
 import { z } from 'zod';
 import {
   attestRelease, deliveryAmountCents, escrowStatus, EscrowVerificationError, verifyBuyerSignature,
-  verifyFunding, verifyRelease, type EscrowAuthorization,
+  verifyFunding, verifyRelease, verifyRetiredRelease, type EscrowAuthorization,
 } from '../integrations/escrow/server';
 import type { FundingTerms } from '../integrations/escrow/shared';
 import type { Actor, Company, DeliveryAuthorization, Dispute, Listing, Order, OrderTransaction, PurchaseRequest, Quote, Review } from '../shared/marketplace';
@@ -14,7 +14,8 @@ import { dateIn, now } from './seed';
 
 type StoredOrder = Order & { fundingTerms?: FundingTerms };
 type StoredQR = DeliveryAuthorization & { id: string; supplierId: string; nonce: `0x${string}`; previousQuantity: number;
-  authorization?: EscrowAuthorization; platformSignature?: `0x${string}`; buyerSignature?: `0x${string}`; transactionHash?: `0x${string}` };
+  authorization?: EscrowAuthorization; platformSignature?: `0x${string}`; buyerSignature?: `0x${string}`; transactionHash?: `0x${string}`;
+  signaturePrivate?: true; retiredAtBlock?: string };
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
 const tokenField = z.string().regex(/^spqr_[a-f0-9]{64}$/i, 'Enter a valid StockPact QR code.');
 const hashField = z.string().regex(/^0x[\da-f]{64}$/i, 'Enter a valid transaction hash.').transform((value) => value.toLowerCase() as `0x${string}`);
@@ -74,7 +75,7 @@ export async function fundOrder(db: DbSession, actor: Actor, input: unknown) {
   if (order.fundedCents && transactionHash && order.transactions.some((tx) => tx.hash === transactionHash && tx.status === 'confirmed')) return order;
   if (order.status !== 'awaiting_funding') throw new MarketplaceError('This order is not ready for funding.', 409);
   const mode = escrowStatus().mode;
-  if (mode === 'demo' && !actor.demoRole) throw new MarketplaceError('Testnet funding is unavailable for this company.', 503);
+  if (mode === 'disabled' || (mode === 'demo' && !actor.demoRole)) throw new MarketplaceError('Testnet funding is unavailable for this company.', 503);
   let txId = `demo-funding:${order.id}`;
   if (mode === 'testnet') {
     const fundingTerms = requireFound(order.fundingTerms, 'Prepare funding terms before submitting a transaction.');
@@ -126,21 +127,40 @@ async function activeQR(db: DbSession, orderId: string) {
   return (await records<StoredQR>(db, tables.qr, sql`order_id = ${orderId} and data->>'status' = 'active'`))[0];
 }
 
+function needsRetirementProof(qr: StoredQR): qr is StoredQR & { authorization: EscrowAuthorization } {
+  return Boolean(qr.authorization && (qr.buyerSignature || !qr.signaturePrivate));
+}
+
+async function retireDelivery(db: DbSession, order: StoredOrder, qr: StoredQR, status: 'cancelled' | 'expired') {
+  const proof = needsRetirementProof(qr)
+    ? await verifyRetiredRelease(qr.authorization, requireFound(order.fundingTerms).buyerWallet)
+    : undefined;
+  if (qr.transactionHash) {
+    const attempt = order.transactions.find((tx) => tx.kind === 'release' && tx.status === 'pending' && tx.hash === qr.transactionHash);
+    if (attempt) await recordTransaction(db, order, { ...attempt, status: 'failed' });
+  }
+  await update(db, tables.qr, qr.id, { ...qr, status: proof?.status ?? status, retiredAtBlock: proof?.blockNumber });
+}
+
 export async function authorizeDelivery(db: DbSession, actor: Actor, input: unknown) {
-  const { orderId, quantity: units } = parse(z.object({ orderId: id, quantity }), input);
+  const { orderId, quantity: units, existingOnly } = parse(z.object({ orderId: id, quantity, existingOnly: z.boolean().optional() }), input);
   const order = await actorOrder(db, actor, orderId) as StoredOrder;
   buyerAccess(actor, order, 'owner', 'approver');
   if (!['dispatched', 'partial'].includes(order.status) || units > order.quantity - settled(order)) {
     throw new MarketplaceError('Choose an outstanding quantity from a dispatched order.', 409);
   }
   const existing = await activeQR(db, order.id);
+  if (existingOnly) {
+    if (existing?.quantity !== units || !existing.token) throw new MarketplaceError('The active code has changed. Reopen the order and try again.', 409);
+    return { ...publicQR(existing, existing.token), buyerWallet: order.fundingTerms?.buyerWallet,
+      requiresOnChainProof: needsRetirementProof(existing) };
+  }
   if (existing) {
     if (Date.parse(existing.expiresAt) > Date.now()) {
       if (existing.quantity === units && existing.token) return { ...publicQR(existing, existing.token), buyerWallet: order.fundingTerms?.buyerWallet };
       throw new MarketplaceError('An active code already exists. Cancel it or wait for it to expire.', 409);
     }
-    if (existing.transactionHash) throw new MarketplaceError('Resolve the submitted testnet release before creating another code.', 409);
-    await update(db, tables.qr, existing.id, { ...existing, status: 'expired' });
+    await retireDelivery(db, order, existing, 'expired');
   }
   const token = `spqr_${randomBytes(32).toString('hex')}`;
   const expiresAt = new Date(Date.now() + 5 * 60_000).toISOString();
@@ -151,6 +171,7 @@ export async function authorizeDelivery(db: DbSession, actor: Actor, input: unkn
     const terms = requireFound(order.fundingTerms);
     Object.assign(qr, await attestRelease({ ...terms, nonce: qr.nonce, totalCents: order.totalCents,
       totalQuantity: order.quantity, quantity: units, amountCents, previousQuantity: qr.previousQuantity, expiresAt }));
+    qr.signaturePrivate = true;
   }
   await save(db, tables.qr, qr.id, qr, { order_id: order.id, supplier_id: order.supplierId });
   orderChanged(order, `Buyer prepared handover for ${units} ${order.unit}`);
@@ -159,10 +180,10 @@ export async function authorizeDelivery(db: DbSession, actor: Actor, input: unkn
   return { ...publicQR(qr, token), buyerWallet: order.fundingTerms?.buyerWallet };
 }
 
-function publicQR(qr: StoredQR, token: string) {
+function publicQR(qr: StoredQR, token: string, includeSettlement = false) {
   return { token, orderId: qr.orderId, quantity: qr.quantity, amountCents: qr.amountCents, expiresAt: qr.expiresAt,
-    status: qr.status, authorization: qr.authorization, platformSignature: qr.platformSignature,
-    buyerSignature: qr.buyerSignature, transactionHash: qr.transactionHash };
+    status: qr.status, authorization: qr.authorization, platformSignature: includeSettlement ? qr.platformSignature : undefined,
+    buyerSignature: includeSettlement ? qr.buyerSignature : undefined, transactionHash: includeSettlement ? qr.transactionHash : undefined };
 }
 
 async function loadQR(db: DbSession, actor: Actor, token: string) {
@@ -175,7 +196,7 @@ async function loadQR(db: DbSession, actor: Actor, token: string) {
 function ensureQR(qr: StoredQR, onChainRecovery = false) {
   if (qr.status === 'redeemed') throw new MarketplaceError('This delivery code has already been used.', 409);
   if (qr.status === 'cancelled') throw new MarketplaceError('This delivery code was cancelled.', 409);
-  if (!onChainRecovery && (qr.status === 'expired' || Date.parse(qr.expiresAt) <= Date.now())) {
+  if (qr.retiredAtBlock || (!onChainRecovery && (qr.status === 'expired' || Date.parse(qr.expiresAt) <= Date.now()))) {
     throw new MarketplaceError('This delivery code has expired. Ask the buyer to issue a new code.', 410);
   }
 }
@@ -200,15 +221,18 @@ export async function inspectDelivery(db: DbSession, actor: Actor, input: unknow
   supplierAccess(actor, order, true);
   ensureQR(qr, order.paymentMode === 'testnet' && Boolean(qr.buyerSignature));
   if (order.paymentMode === 'testnet' && !qr.buyerSignature) throw new MarketplaceError('The buyer still needs to sign this code with their wallet.', 409);
-  return publicQR(qr, token);
+  return publicQR(qr, token, true);
 }
 
-export async function cancelDelivery(db: DbSession, actor: Actor, orderId: string) {
-  const order = await actorOrder(db, actor, orderId);
+export async function cancelDelivery(db: DbSession, actor: Actor, input: unknown) {
+  const { orderId, token } = parse(z.object({ orderId: id, token: tokenField.optional() }), typeof input === 'string' ? { orderId: input } : input);
+  const order = await actorOrder(db, actor, orderId) as StoredOrder;
   buyerAccess(actor, order, 'owner', 'approver');
   const qr = requireFound(await activeQR(db, order.id), 'No active delivery code was found.');
-  if (qr.buyerSignature) throw new MarketplaceError('A signed testnet authorization must expire or be cancelled on chain.', 409);
-  await update(db, tables.qr, qr.id, { ...qr, status: 'cancelled' });
+  if ((token && hash(token) !== qr.id) || (!token && order.paymentMode === 'testnet')) {
+    throw new MarketplaceError('The active code has changed. Reopen the order and try again.', 409);
+  }
+  await retireDelivery(db, order, qr, 'cancelled');
   orderChanged(order, 'Buyer cancelled the handover code');
   await update(db, tables.orders, order.id, order);
   return order;
@@ -315,19 +339,18 @@ export async function cancelOrder(db: DbSession, actor: Actor, orderId: string) 
 
 export async function openDispute(db: DbSession, actor: Actor, input: unknown) {
   const { orderId, reason, quantity: units } = parse(z.object({ orderId: id, reason: z.string().trim().min(4).max(1800), quantity }), input);
-  const order = await actorOrder(db, actor, orderId);
+  const order = await actorOrder(db, actor, orderId) as StoredOrder;
   requireRole(actor, 'owner', 'approver', 'purchaser', 'sales');
   if (!['dispatched', 'partial'].includes(order.status) || units > order.quantity - settled(order)) {
     throw new MarketplaceError('Only outstanding quantities on a dispatched order can be disputed.', 409);
   }
   const qr = await activeQR(db, order.id);
-  if (qr?.buyerSignature) throw new MarketplaceError('Reconcile any signed testnet release before opening a dispute.', 409);
-  if (qr) await update(db, tables.qr, qr.id, { ...qr, status: 'cancelled' });
+  if (qr) await retireDelivery(db, order, qr, 'cancelled');
   const dispute: Dispute = { id: randomUUID(), orderId, openedBy: actor.companyId, reason, quantity: units,
     amountCents: releaseAmount(order, units), status: 'open', createdAt: now() };
   await save(db, tables.disputes, dispute.id, dispute, { order_id: order.id });
   order.status = 'disputed';
-  orderChanged(order, 'Delivery dispute opened');
+  orderChanged(order, order.paymentMode === 'testnet' ? 'Delivery dispute recorded in StockPact' : 'Delivery dispute opened');
   await update(db, tables.orders, order.id, order);
   await notify(db, actor.companyId === order.buyerId ? order.supplierId : order.buyerId, 'Delivery dispute opened', `${order.reference} has a delivery dispute.`, '#orders');
   await audit(db, actor, 'open_dispute', dispute.id);

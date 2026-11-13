@@ -1,0 +1,341 @@
+.dashboard-home .view-title {
+  margin-bottom: 20px;
+}
+
+.home-location {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.home-location svg {
+  color: var(--accent-ink);
+  flex: 0 0 auto;
+}
+
+.sourcing-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.14fr) minmax(0, 1fr);
+  min-height: 326px;
+  overflow: hidden;
+  border: 1px solid #d5a91e;
+  border-radius: 17px;
+  background: var(--gold);
+}
+
+.sourcing-hero-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-start;
+  padding: clamp(23px, 3vw, 45px);
+}
+
+.sourcing-hero h2 {
+  max-width: 14ch;
+  font-size: clamp(36px, 4.1vw, 65px);
+  font-weight: 780;
+  line-height: .99;
+  letter-spacing: -.071em;
+  text-wrap: balance;
+}
+
+.sourcing-hero-copy > p {
+  max-width: 43ch;
+  margin-top: 14px;
+  color: #3e2c1b;
+  font-size: clamp(13px, 1.2vw, 15px);
+}
+
+.sourcing-form {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  max-width: 520px;
+  margin-top: 20px;
+  padding: 5px;
+  background: #fffdf7;
+  border: 1px solid #94702b;
+  border-radius: 10px;
+  box-shadow: 0 4px 0 #53371119;
+}
+
+.sourcing-form > input {
+  min-width: 0;
+  flex: 1;
+  min-height: 44px;
+  padding: 8px 9px;
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  font-size: 15px;
+}
+
+.sourcing-form > input::placeholder {
+  color: #756b60;
+}
+
+.sourcing-form > input:focus-visible {
+  outline-offset: -1px;
+}
+
+.sourcing-form .icon-button {
+  min-width: 42px;
+  min-height: 44px;
+  color: var(--ink);
+  background: #f4eee2;
+  border-color: #f4eee2;
+}
+
+.sourcing-form .icon-button:hover {
+  background: #ebdfc9;
+}
+
+.sourcing-form .primary {
+  min-height: 44px;
+  padding-inline: 13px;
+  border: 1px solid var(--ink);
+  color: #fffaf0;
+  background: var(--ink);
+  white-space: nowrap;
+}
+
+.sourcing-form .primary:hover:not(:disabled) {
+  border-color: #443226;
+  background: #443226;
+}
+
+.sourcing-helpers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 15px;
+  margin-top: 12px;
+}
+
+.sourcing-helpers button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 35px;
+  padding: 0;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 680;
+  text-decoration: underline;
+  text-decoration-color: #72561d8a;
+}
+
+.sourcing-helpers button:hover {
+  text-decoration-color: currentColor;
+}
+
+.sourcing-hero :focus-visible {
+  outline-color: #5d3a0b;
+}
+
+.sourcing-photo {
+  position: relative;
+  display: grid;
+  align-items: end;
+  justify-items: start;
+  min-height: 100%;
+  margin: 0;
+  isolation: isolate;
+  background: #7c644b;
+}
+
+.sourcing-photo img {
+  z-index: -2;
+  object-fit: cover;
+  object-position: 50% 35%;
+}
+
+.sourcing-photo::before {
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  background: linear-gradient(0deg, #1e150c75, transparent 35%);
+  content: "";
+}
+
+.sourcing-photo figcaption {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 15px 15px;
+  padding: 6px 9px;
+  color: #fffaf0;
+  background: #241b15eb;
+  border: 1px solid #e3d4bb57;
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.sourcing-photo figcaption svg {
+  color: var(--gold);
+}
+
+.overview-totals {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(156px, 1fr));
+  gap: 1px;
+  margin: 17px 0 20px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--line);
+}
+
+.overview-total {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-content: start;
+  gap: 7px 8px;
+  min-width: 0;
+  padding: 15px 16px 14px;
+  text-align: left;
+  color: var(--ink);
+  background: var(--surface);
+}
+
+.overview-total:hover {
+  background: #fff7db;
+}
+
+.overview-total:focus-visible {
+  outline-offset: -4px;
+}
+
+.overview-total-icon {
+  color: var(--accent-ink);
+}
+
+.overview-total-arrow {
+  color: var(--muted);
+}
+
+.overview-total strong {
+  grid-column: 1/-1;
+  margin-top: 2px;
+  font-size: clamp(25px, 2.4vw, 34px);
+  line-height: 1;
+  letter-spacing: -.05em;
+  font-variant-numeric: tabular-nums;
+}
+
+.overview-total span {
+  grid-column: 1/-1;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 620;
+}
+
+.dashboard-work .panel {
+  padding: clamp(14px, 2vw, 21px);
+}
+
+@media (max-width: 900px) {
+  .sourcing-hero-copy {
+    padding: 24px;
+  }
+
+  .sourcing-form > input {
+    font-size: 14px;
+  }
+}
+
+@media (max-width: 680px) {
+  .dashboard-home .view-title {
+    margin-bottom: 16px;
+  }
+
+  .sourcing-hero {
+    grid-template-columns: minmax(0, 1fr);
+    border-radius: 13px;
+  }
+
+  .sourcing-hero-copy {
+    padding: 22px 18px 16px;
+  }
+
+  .sourcing-hero h2 {
+    font-size: clamp(34px, 8.7vw, 50px);
+  }
+
+  .sourcing-hero-copy > p {
+    margin-top: 10px;
+  }
+
+  .sourcing-form {
+    margin-top: 15px;
+  }
+
+  .sourcing-form > input {
+    font-size: 16px;
+    padding-inline: 6px;
+  }
+
+  .sourcing-form .primary {
+    padding-inline: 9px;
+  }
+
+  .sourcing-helpers {
+    margin-top: 7px;
+  }
+
+  .sourcing-helpers button {
+    min-height: 39px;
+  }
+
+  .sourcing-photo {
+    grid-row: 1;
+    min-height: 0;
+    aspect-ratio: 2 / 1;
+  }
+
+  .sourcing-photo figcaption {
+    margin: 0 0 9px 9px;
+  }
+
+  .overview-totals {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    margin-block: 13px 16px;
+  }
+}
+
+@media (max-width: 410px) {
+  .sourcing-form {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    padding: 0;
+    border: 0;
+    box-shadow: none;
+    background: transparent;
+  }
+
+  .sourcing-form > input {
+    min-height: 46px;
+    padding-inline: 10px;
+    border: 1px solid #94702b;
+    border-radius: 8px;
+    background: #fffdf7;
+  }
+
+  .sourcing-form .icon-button {
+    min-height: 46px;
+    min-width: 46px;
+    border-color: #94702b;
+    background: #fff7d9;
+  }
+
+  .sourcing-form .primary {
+    grid-column: 1/-1;
+  }
+}
