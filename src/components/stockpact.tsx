@@ -47,7 +47,7 @@ export function StockPact() {
   const [route, setRoute] = useState<Route>(start);
   const [notice, setNotice] = useState<{ text: string; error: boolean } | null>(null);
   const [loadError, setLoadError] = useState("");
-  const [needsReconnect, setNeedsReconnect] = useState<'refresh' | 'action' | null>(null);
+  const [connection, setConnection] = useState<'connected' | 'refresh' | 'action' | 'restored'>('connected');
   const [busy, setBusy] = useState("");
   const [dialog, setDialog] = useState<"profile" | "notifications" | "more" | "search" | null>(null);
   const [query, setQuery] = useState("");
@@ -88,11 +88,11 @@ export function StockPact() {
         restoreRequest(body.actor);
         setState(body);
         setLoadError('');
-        setNeedsReconnect((current) => current === 'refresh' ? null : current);
+        setConnection((current) => current === 'action' ? 'restored' : current === 'refresh' ? 'connected' : current);
       }
     } catch (caught) {
       if (!signal?.aborted && version === revision.current) {
-        if (caught instanceof WorkspaceReconnectError) setNeedsReconnect((current) => current ?? 'refresh');
+        if (caught instanceof WorkspaceReconnectError) setConnection((current) => current === 'action' ? current : 'refresh');
         else if (!silent) setLoadError(caught instanceof Error ? caught.message : "Unable to connect. Try again.");
       }
     } finally { activePoll.current = false; }
@@ -101,10 +101,21 @@ export function StockPact() {
   useEffect(() => {
     const abort = new AbortController();
     const sync = () => setRoute(readRoute());
+    const refreshVisible = () => { if (document.visibilityState === 'visible') void refresh(abort.signal, true); };
     window.addEventListener("hashchange", sync);
+    window.addEventListener('pageshow', refreshVisible);
+    document.addEventListener('visibilitychange', refreshVisible);
     const frame = window.requestAnimationFrame(() => { sync(); void refresh(abort.signal); });
-    const interval = window.setInterval(() => { if (document.visibilityState === "visible") void refresh(abort.signal, true); }, 2800);
-    return () => { abort.abort(); activePoll.current = false; window.cancelAnimationFrame(frame); window.clearInterval(interval); window.removeEventListener("hashchange", sync); };
+    const interval = window.setInterval(refreshVisible, 2800);
+    return () => {
+      abort.abort();
+      activePoll.current = false;
+      window.cancelAnimationFrame(frame);
+      window.clearInterval(interval);
+      window.removeEventListener('hashchange', sync);
+      window.removeEventListener('pageshow', refreshVisible);
+      document.removeEventListener('visibilitychange', refreshVisible);
+    };
   }, [refresh]);
 
   useEffect(() => {
@@ -139,14 +150,22 @@ export function StockPact() {
       const { response, data: result } = action === "saveListingPhoto" && values instanceof FormData
         ? await workspaceJson<Result<T>>("/api/listing-photo", { method: "POST", body: values })
         : await workspaceJson<Result<T>>("/api/actions", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...values, action }) });
-      setNeedsReconnect(null);
-      if (result.state) { restoreRequest(result.state.actor); setState(result.state); }
+      setConnection('connected');
+      if (result.state) {
+        if (state?.actor && (state.actor.id !== result.state.actor?.id || state.actor.companyId !== result.state.actor?.companyId)) {
+          requestSubmission.current = null;
+          setDraft(null);
+          setPrompt('');
+        }
+        restoreRequest(result.state.actor);
+        setState(result.state);
+      }
       if (!response.ok || result.error) throw new Error(result.error || "That action could not be completed. Try again.");
       if (action === 'createRequest') requestSubmission.current = null;
       if (success) setNotice({ text: success, error: false });
       return result;
     } catch (caught) {
-      if (caught instanceof WorkspaceReconnectError) setNeedsReconnect('action');
+      if (caught instanceof WorkspaceReconnectError) setConnection('action');
       else setNotice({ text: caught instanceof Error ? caught.message : "Connection interrupted. Try again.", error: true });
       return null;
     } finally {
@@ -157,7 +176,7 @@ export function StockPact() {
 
   function reconnect() {
     const actor = state?.actor;
-    if (actor && route.view === 'assistant' && (draft || prompt)) {
+    if (actor && (draft || prompt)) {
       const submission = requestSubmission.current;
       const saved: RequestRecovery = { actorId: actor.id, companyId: actor.companyId, savedAt: Date.now(), prompt, draft,
         requestId: submission && submission.draft === JSON.stringify(draft) ? submission.id : undefined };
@@ -175,11 +194,12 @@ export function StockPact() {
   }
 
   const startDraft = (value: RequestDraft) => { requestSubmission.current = null; setPrompt(""); setDraft(value); navigate("assistant"); };
-  const reconnectNotice = needsReconnect && <div className="notice notice-warn app-notice reconnect-notice" role="alert">
-    <CircleAlert size={17} /><span>Reconnect to your StockPact workspace{state?.actor && route.view === 'assistant' && (draft || prompt) ? '. Your request details will be kept on this device' : ''}.</span>
+  const reconnectNotice = (connection === 'action' || connection === 'refresh') && <div className="notice notice-warn app-notice reconnect-notice" role="alert">
+    <CircleAlert size={17} /><span>Reconnect to your StockPact workspace{state?.actor && (draft || prompt) ? '. Your request details will be kept on this device' : ''}.</span>
     <button type="button" className="secondary" onClick={reconnect}>Reconnect</button>
   </div>;
-  const showNotice = reconnectNotice || (notice && <div className={`notice app-notice${notice.error ? " notice-error" : ""}`} role={notice.error ? "alert" : "status"}>{notice.error ? <CircleAlert size={17} /> : <CircleCheck size={17} />}<span>{notice.text}</span><button type="button" aria-label="Dismiss notice" onClick={() => setNotice(null)}><X size={17} /></button></div>);
+  const activeNotice = notice ?? (connection === 'restored' ? { text: 'Connection restored. You can try your last action again.', error: false } : null);
+  const showNotice = reconnectNotice || (activeNotice && <div className={`notice app-notice${activeNotice.error ? " notice-error" : ""}`} role={activeNotice.error ? "alert" : "status"}>{activeNotice.error ? <CircleAlert size={17} /> : <CircleCheck size={17} />}<span>{activeNotice.text}</span><button type="button" aria-label="Dismiss notice" onClick={() => { setNotice(null); setConnection((current) => current === 'restored' ? 'connected' : current); }}><X size={17} /></button></div>);
 
   if (!state) return <main className="auth-screen"><section className="card auth-card stack"><Brand />{reconnectNotice || (loadError ? <><p role="alert" className="notice notice-error"><CircleAlert size={17} />{loadError}</p><div><button className="primary" type="button" onClick={() => void refresh()}>Try again</button></div></> : <Busy label="Opening your procurement workspace" />)}</section></main>;
 
