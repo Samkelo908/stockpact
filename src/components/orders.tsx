@@ -8,7 +8,7 @@ import { AuthorizeTestnetDelivery, OrderFunding, RevokeTestnetDelivery } from ".
 import { companyName, csv, download, type Navigate, type RunAction } from "./client";
 import { QrDialog } from "./delivery-qr";
 import { Busy, Dialog, Empty, PanelTitle, Tag, ViewTitle, dateLabel, money, number } from "./ui";
-import { isXrplAvailable, orderStateLabel, xrplAmount, XrplActivity, XrplCheckout } from "./xrpl-autopay";
+import { attemptStatuses, formatXrplDrops, isXrplAvailable, orderStateLabel, xrplAmount, XrplActivity, XrplCheckout, xrplOrderPayment } from "./xrpl-autopay";
 
 type OrderProps = { state: MarketplaceState; order: Order; busy: string; run: RunAction; navigate: Navigate; startDraft: (draft: RequestDraft) => void };
 type PaymentMode = OrderTransaction["mode"];
@@ -23,8 +23,19 @@ function paymentAmount(value: number, mode: PaymentMode, unit?: string, currency
   return mode === "testnet" ? `${(value / 100).toFixed(2)} ${unit ?? "test tokens"}` : money(value, currency);
 }
 
-function receipt(order: Order, transaction?: OrderTransaction) {
+function receipt(order: Order, transaction?: OrderTransaction, xrplPayment?: ReturnType<typeof xrplOrderPayment>) {
   const lines = [transaction ? "StockPact payment receipt" : "StockPact order record", `Order ${order.reference}`, `Goods: ${order.product}`, `Quantity: ${order.quantity} ${order.unit}`, `Delivery: ${order.location} · ${dateLabel(order.deliveryDate)}`, `Quoted total: ${money(order.totalCents, order.currency)} (${order.currency ?? "ZAR"})`, ""];
+  if (!transaction && xrplPayment) {
+    lines.push(`Delivery status: ${orderStateLabel(order)}`, `Accepted quantity: ${order.acceptedQuantity} of ${order.quantity} ${order.unit}`,
+      `XRPL Testnet settlement status: ${xrplPayment.label}`, `Validated payments: ${formatXrplDrops(xrplPayment.confirmed)}`, "");
+    for (const attempt of xrplPayment.attempts) {
+      lines.push(`${attemptStatuses[attempt.status].label} · ${formatXrplDrops(attempt.drops)}`, `Handover payment reference: ${attempt.id}`);
+      if (attempt.reason) lines.push(attempt.reason);
+      if (attempt.hash) lines.push(`Transaction hash: ${attempt.hash}`);
+      if (attempt.ledgerIndex != null) lines.push(`Validated ledger: ${attempt.ledgerIndex}`);
+      lines.push("");
+    }
+  }
   for (const item of transaction ? [transaction] : order.transactions) {
     const amount = paymentAmount(item.amountCents, item.mode, undefined, order.currency);
     lines.push(`${transactionKinds[item.kind].label} · ${item.status} · ${amount}`,
@@ -40,13 +51,14 @@ function receipt(order: Order, transaction?: OrderTransaction) {
 
 export function Orders({ state, selected, busy, run, navigate, startDraft }: Omit<OrderProps, "order"> & { selected: string }) {
   const [query, setQuery] = useState("");
-  const orders = state.orders.filter((item) => `${item.product} ${item.reference} ${orderStateLabel(item)}`.toLowerCase().includes(query.trim().toLowerCase()));
-  const order = orders.find((item) => item.id === selected) ?? orders[0];
+  const orders = state.orders.map((item) => ({ item, payment: xrplOrderPayment(state, item) })).filter(({ item, payment }) =>
+    `${item.product} ${item.reference} ${orderStateLabel(item)} ${payment?.label ?? ""}`.toLowerCase().includes(query.trim().toLowerCase()));
+  const order = (orders.find(({ item }) => item.id === selected) ?? orders[0])?.item;
   return <>
     <ViewTitle title="Orders" subtitle="Manage funding, dispatch, delivery acceptance and order records." />
     <div className="workspace-grid">
       <section className="card panel small-stack workspace-selector"><PanelTitle title="Order history" /><label className="field">Search orders<input type="search" value={query} onChange={(event) => setQuery(event.currentTarget.value)} placeholder="Product, reference or status" /></label>
-        {orders.map((item) => <button key={item.id} type="button" className="list-button" aria-pressed={order?.id === item.id} onClick={() => navigate("orders", item.id)}><div><strong>{item.product}</strong><small>{item.reference} · {money(item.totalCents)}</small></div><Tag value={orderStateLabel(item)} /></button>)}
+        {orders.map(({ item, payment }) => <button key={item.id} type="button" className="list-button" aria-pressed={order?.id === item.id} onClick={() => navigate("orders", item.id)}><div><strong>{item.product}</strong><small>{item.reference} · {money(item.totalCents, item.currency)}</small>{payment && <small>{payment.label}</small>}</div><Tag value={orderStateLabel(item)} /></button>)}
         {!orders.length && <Empty title={query ? "No matching orders" : "No orders yet"} detail={query ? "Try a different product or order reference." : "Accepted supplier quotes become orders."} icon={PackageCheck} />}
       </section>
       {order && <OrderDetail key={order.id} state={state} order={order} busy={busy} run={run} navigate={navigate} startDraft={startDraft} />}
@@ -67,6 +79,7 @@ function OrderDetail({ state, order, busy, run, navigate, startDraft }: OrderPro
   const canInspect = canPay && ["dispatched", "partial"].includes(order.status);
   const paymentMode = order.paymentMode ?? state.escrow.mode;
   const xrpl = paymentMode === "xrpl";
+  const xrplPayment = xrplOrderPayment(state, order);
   const testnet = paymentMode === "testnet";
   const canSettle = testnet || (state.escrow.mode === "demo" && state.actor?.demoRole);
   const canEnableXrpl = isXrplAvailable(state, order);
@@ -106,10 +119,13 @@ function OrderDetail({ state, order, busy, run, navigate, startDraft }: OrderPro
         {purchasing && order.status === "completed" && !order.reviewId && <button type="button" className="primary" disabled={!!busy} onClick={() => setDialog("review")}><Star size={16} />Leave review</button>}
         {purchasing && order.status === "completed" && <button type="button" className="secondary" disabled={!!busy} onClick={() => void reorder()}><RotateCw size={16} />Buy again</button>}
         {(purchasing || canPay || sales) && ["dispatched", "partial"].includes(order.status) && !dispute && <button type="button" className="secondary" disabled={!!busy} onClick={() => setDialog("dispute")}><AlertTriangle size={16} />Report an issue</button>}
-        <button type="button" className="secondary" onClick={() => receipt(order)}><Download size={16} />Order summary</button>
+        <button type="button" className="secondary" onClick={() => receipt(order, undefined, xrplPayment)}><Download size={16} />Order summary</button>
       </div>
     </section>
-    <XrplActivity state={state} order={order} busy={busy} run={run} />
+    {xrplPayment && <section className="card panel small-stack"><PanelTitle title="Testnet payment status" action={<Tag value={xrplPayment.label} variant={xrplPayment.variant} />} />
+      <dl className="details-grid"><div><dt>Validated payments</dt><dd>{formatXrplDrops(xrplPayment.confirmed)}</dd></div><div><dt>Accepted value awaiting settlement</dt><dd>{xrplPayment.unpaid === undefined ? "—" : formatXrplDrops(xrplPayment.unpaid)}</dd></div></dl>
+    </section>}
+    <XrplActivity state={state} order={order} navigate={navigate} busy={busy} run={run} />
     {order.transactions.length > 0 && <section className="card panel"><PanelTitle title="Payment activity" subtitle="Track settlement status and download confirmed records." /><TransactionList order={order} /></section>}
     <section className="card panel stack"><PanelTitle title="Order conversation" />
       {order.messages.length ? <div className="small-stack">{order.messages.map((item) => <div key={item.id} className="subcard"><div className="split-line"><h3>{item.author}</h3><time className="small-note" dateTime={item.createdAt}>{dateLabel(item.createdAt)}</time></div><p>{item.body}</p></div>)}</div> : <p className="small-note">No messages yet.</p>}

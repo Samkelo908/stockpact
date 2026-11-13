@@ -9,10 +9,11 @@ import { id, listingFields, parse } from './inputs';
 import * as orders from './orders';
 import * as procurement from './procurement';
 import * as reputation from './reputation';
+import { postRequestMessage, readEarlierRequestMessages } from './request-chat';
 import { now, resetDemo } from './seed';
 import { actorForUser, applyRegistrationCookies, clearSession, demoActor, getActor, getAuth, registerCompanyAccount, selectCompany } from './session';
 import * as settings from './settings';
-import { pauseXrplMandate, upsertXrplMandate } from './xrpl';
+import { pauseXrplMandate, requeueXrplPayment, upsertXrplMandate } from './xrpl';
 
 const email = z.email().transform((value) => value.toLowerCase());
 const password = z.string().min(10).max(128);
@@ -57,25 +58,22 @@ async function authActions(action: string, input: unknown): Promise<{ actor?: Ac
   }
 }
 
-async function supplierReply(db: DbSession, actor: Actor, input: unknown, decline: boolean) {
+async function declineRequest(db: DbSession, actor: Actor, input: unknown) {
   requireRole(actor, 'owner', 'sales');
   const { requestId, body } = parse(z.object({ requestId: id, body: z.string().trim().max(1500).optional() }), input);
   const request = await supplierRequest(db, actor, requestId);
   if (request.status !== 'sent') throw new MarketplaceError('This request is no longer open.', 409);
-  if (!decline && !body) throw new MarketplaceError('Enter a question for the buyer.', 422);
   const company = await actorCompany(actor, db);
   const key = `${request.id}:${actor.companyId}`;
   const invitation = requireFound(await record<procurement.SupplierInvitation>(db, tables.invitations, key));
   if (invitation.status === 'declined') throw new MarketplaceError('This supplier already declined the request.', 409);
-  await update(db, tables.invitations, key, { ...invitation, status: decline ? 'declined' : invitation.status,
-    note: decline ? body : invitation.note, activity: [...(invitation.activity ?? []), { title: decline ? (body ? `Declined · ${body}` : 'Declined') : `Question sent · ${body}`, at: now() }] });
-  if (decline) {
-    const quotes = await records<{ id: string; status: string }>(db, tables.quotes, sql`request_id = ${requestId} and company_id = ${actor.companyId} and data->>'status' = 'submitted'`);
-    for (const quote of quotes) await update(db, tables.quotes, quote.id, { ...quote, status: 'declined' });
-  }
-  request.activity.push({ title: decline ? `${company.name} declined the request` : `${company.name} asked: ${body}`, at: now() });
+  await update(db, tables.invitations, key, { ...invitation, status: 'declined', note: body,
+    activity: [...(invitation.activity ?? []), { title: body ? `Declined · ${body}` : 'Declined', at: now() }] });
+  const quotes = await records<{ id: string; status: string }>(db, tables.quotes, sql`request_id = ${requestId} and company_id = ${actor.companyId} and data->>'status' = 'submitted'`);
+  for (const quote of quotes) await update(db, tables.quotes, quote.id, { ...quote, status: 'declined' });
+  request.activity.push({ title: `${company.name} declined the request`, at: now() });
   await update(db, tables.requests, requestId, request);
-  await notify(db, request.buyerId, decline ? 'Supplier declined request' : 'Supplier question', body ?? `${company.name} declined to quote.`, '#requests');
+  await notify(db, request.buyerId, 'Supplier declined request', body ?? `${company.name} declined to quote.`, '#requests');
 }
 
 export async function marketplaceAction(action: string, input: unknown): Promise<{ actor?: Actor | null; data?: unknown }> {
@@ -84,6 +82,12 @@ export async function marketplaceAction(action: string, input: unknown): Promise
   const actor = await getActor();
   if (!actor) throw new MarketplaceError('Sign in to continue.', 401);
   if (action === 'switchCompany') return { actor: requireFound(await selectCompany(actor, field(input, 'companyId'))) };
+  if (action === 'requestEmailVerification') {
+    if (actor.demoRole || !process.env.STOCKPACT_EMAIL_WEBHOOK) throw new MarketplaceError('Account email verification is unavailable in this workspace.', 503);
+    if (actor.emailVerified) return {};
+    await (await getAuth()).api.sendVerificationEmail({ body: { email: actor.email, callbackURL: '/#settings' }, headers: await headers() });
+    return {};
+  }
   if (action === 'draftRequest') {
     requireRole(actor, 'owner', 'purchaser');
     const { prompt } = parse(z.object({ prompt: z.string().trim().min(3).max(3500) }), input);
@@ -99,15 +103,25 @@ export async function marketplaceAction(action: string, input: unknown): Promise
     if (!actor.demoRole) throw new MarketplaceError('XRPL Testnet autopay is available in the fictional workspace.', 403);
     return { data: { xrplAttemptId: field(input, 'attemptId') } };
   }
+  if (action === 'readEarlierRequestMessages') return { data: await readEarlierRequestMessages(await getDb(), actor, input) };
   const data = await mutate(async (db) => {
+    if (!actor.demoRole) {
+      const active = await sql`select id from memberships where company_id = ${actor.companyId} and user_id = ${actor.id} and role = ${actor.role}`.execute(db);
+      if (!active.rows.length) throw new MarketplaceError('Your access to this company has changed. Refresh the workspace.', 403);
+    }
     switch (action) {
       case 'createRequest': return procurement.createRequest(db, actor, input);
+      case 'createMultiRequest': return procurement.createMultiRequest(db, actor, input);
       case 'matchRequest': return procurement.enqueueMatch(db, actor, field(input, 'requestId'));
       case 'sendRequest': return procurement.sendRequest(db, actor, input);
       case 'submitQuote': return procurement.submitQuote(db, actor, input);
       case 'acceptQuote': return procurement.acceptQuote(db, actor, field(input, 'quoteId'));
-      case 'declineRequest': return supplierReply(db, actor, input, true);
-      case 'askRequest': return supplierReply(db, actor, input, false);
+      case 'declineRequest': return declineRequest(db, actor, input);
+      case 'askRequest': {
+        const { requestId, body } = parse(z.object({ requestId: id, body: z.string() }), input);
+        return postRequestMessage(db, actor, { requestId, body, supplierId: actor.companyId });
+      }
+      case 'postRequestMessage': return postRequestMessage(db, actor, input);
       case 'saveListing': return procurement.saveListing(db, actor, input);
       case 'importListings': {
         const { listings } = parse(z.object({ listings: z.array(listingFields).min(1).max(100) }), input);
@@ -126,6 +140,7 @@ export async function marketplaceAction(action: string, input: unknown): Promise
       case 'enableXrplOrder': return orders.enableXrplOrder(db, actor, field(input, 'orderId'));
       case 'saveXrplMandate': return upsertXrplMandate(db, actor, input);
       case 'pauseXrplMandate': return pauseXrplMandate(db, actor, input);
+      case 'requeueXrplPayment': return requeueXrplPayment(db, actor, input);
       case 'dispatchOrder': return orders.dispatchOrder(db, actor, field(input, 'orderId'));
       case 'assignDriver': return orders.assignDriver(db, actor, input);
       case 'authorizeDelivery': return orders.authorizeDelivery(db, actor, input);
@@ -153,6 +168,7 @@ export async function marketplaceAction(action: string, input: unknown): Promise
       case 'setWallet': return settings.setWallet(db, actor, input);
       case 'inviteMember': return settings.inviteMember(db, actor, input);
       case 'acceptInvitation': return settings.acceptInvitation(db, actor, input);
+      case 'removeTeamMember': return settings.removeTeamMember(db, actor, input);
       default: throw new MarketplaceError('This action is unavailable.', 404);
     }
   });

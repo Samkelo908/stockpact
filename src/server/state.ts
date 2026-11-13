@@ -5,6 +5,7 @@ import { verificationProvider } from '../integrations/verification';
 import type { Actor, Company, DeliveryAuthorization, Dispute, Listing, MarketplaceState, Notice, Order, PurchaseRequest, Quote, Review, ShoppingList, SupplierResponse, VerificationCheck } from '../shared/marketplace';
 import { orderScope } from './access';
 import { demoEnabled, getDb, record, records, tables } from './db';
+import { readRequestConversations } from './request-chat';
 import { demoRoleOptions } from './seed';
 import { getXrplState } from './xrpl';
 
@@ -19,6 +20,7 @@ export async function marketplaceState(actor: Actor | null): Promise<Marketplace
   const demo = demoEnabled();
   const escrow = escrowStatus();
   const base: MarketplaceState = { actor, demo, aiMode: purchasingMode(),
+    accountEmailAvailable: Boolean(process.env.STOCKPACT_EMAIL_WEBHOOK),
     escrow: actor && !actor.demoRole && escrow.mode === 'demo' ? { mode: 'disabled' } : escrow, roles: demo ? demoRoleOptions : [],
     companies: [], listings: [], requests: [], quotes: [], orders: [], notifications: [], favorites: [], preferredSuppliers: [],
     reviews: [], disputes: [], shoppingLists: [], team: [] };
@@ -37,7 +39,7 @@ export async function marketplaceState(actor: Actor | null): Promise<Marketplace
   const requestWhere = sql`(${canBuy} and company_id = ${own}) or (${canSell} and exists (
     select 1 from supplier_invitations s where s.request_id = purchase_requests.id and s.company_id = ${own}))`;
   const companyWhere = sql`demo = ${realm} and (id = ${own} or data->'verification'->>'business' = 'verified' or ${canModerate})`;
-  const [companies, listings, requests, quotes, orders, notices, prefs, reviews, disputes, shopping, team, authorizations, responses, verification, xrpl] = await Promise.all([
+  const [companies, listings, requests, quotes, orders, notices, prefs, reviews, disputes, shopping, team, authorizations, responses, verification, xrpl, requestConversations] = await Promise.all([
     records<Company>(db, tables.companies, companyWhere),
     records<Listing>(db, tables.listings, sql`company_id in (select id from companies where ${companyWhere})
       and (company_id = ${own} or data->>'archived' = 'false')`),
@@ -64,6 +66,7 @@ export async function marketplaceState(actor: Actor | null): Promise<Marketplace
       (${canModerate} and company_id in (select id from companies where demo = ${realm}))
       order by created_at desc limit 150`.execute(db),
     getXrplState(actor),
+    readRequestConversations(db, actor),
   ]);
   const protectedCompanies = companies.map((company) => company.id === own || canModerate ? company : {
     ...company, registrationNumber: undefined, contact: undefined, representative: undefined,
@@ -71,11 +74,14 @@ export async function marketplaceState(actor: Actor | null): Promise<Marketplace
     verificationNote: undefined, verificationReviewIds: undefined, approvalThresholdCents: undefined, wallet: undefined,
   });
   const authorizedRequests = requests.map((request) => {
-    const supplierResponses = responses.rows.filter((entry) => entry.requestId === request.id).map(({ supplierId, data }) => ({ supplierId, ...data }));
-    if (request.buyerId === own) return { ...request, supplierResponses };
-    return { ...request, draft: { ...request.draft, budgetCents: request.draft.shareBudget ? request.draft.budgetCents : null },
+    const supplierResponses = responses.rows.filter((entry) => entry.requestId === request.id).map(({ supplierId, data }) => ({
+      supplierId, ...data, activity: data.activity?.filter(({ title }) => !title.startsWith('Question sent · ')),
+    }));
+    const conversations = requestConversations.get(request.id) ?? [];
+    if (request.buyerId === own) return { ...request, supplierResponses, conversations };
+    return { ...request, group: undefined, draft: { ...request.draft, budgetCents: request.draft.shareBudget ? request.draft.budgetCents : null },
       matches: request.matches.filter(({ supplierId }) => supplierId === own), supplierIds: [own],
-      supplierResponses, activity: supplierResponses.flatMap(({ activity }) => activity ?? []) };
+      supplierResponses, conversations, activity: supplierResponses.flatMap(({ activity }) => activity ?? []) };
   });
   return { ...base, ...prefs, xrpl, companies: protectedCompanies, listings, requests: recent(authorizedRequests), quotes: recent(quotes),
     orders: recent(orders.map((order) => {

@@ -1,0 +1,13 @@
+.request-group-items { display: grid; gap: 6px; }
+.request-chat-log { min-height: 96px; max-height: min(310px, 34dvh); overflow-y: auto; overscroll-behavior: contain; border: 1px solid var(--line); border-radius: 9px; background: var(--canvas); padding: 9px; }
+.request-chat-log ul { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.request-chat-log li { display: flex; }
+.request-chat-log li.request-chat-own { justify-content: flex-end; }
+.request-chat-message { max-width: min(100%, 410px); padding: 8px 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); overflow-wrap: anywhere; }
+.request-chat-own .request-chat-message { border-color: #e7d6a2; background: #fff4d2; }
+.request-chat-byline { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; color: var(--muted); font-size: 11px; }
+.request-chat-byline strong { color: var(--ink); }
+.request-chat-message p { margin-top: 3px; font-size: 13px; white-space: pre-wrap; }
+.request-chat-earlier { display: flex; justify-content: center; margin-bottom: 8px; }
+.request-chat-empty { padding: 13px 4px; text-align: center; }
+.request-chat .field textarea { min-height: 58px; }

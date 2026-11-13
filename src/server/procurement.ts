@@ -16,10 +16,43 @@ export async function createRequest(db: DbSession, actor: Actor, input: unknown)
   requireCapability(await actorCompany(actor, db), 'buyer');
   const details = parse(z.object({ draft }), input).draft;
   if (details.requiredDate < dateIn(0)) throw new MarketplaceError('The required date must be today or later.', 422);
-  const request: PurchaseRequest = { id: randomUUID(), buyerId: actor.companyId, draft: details, status: 'draft',
-    createdAt: now(), matches: [], supplierIds: [], activity: [{ title: 'Purchase request saved', at: now() }] };
+  const request = newPurchaseRequest(actor.companyId, details);
   await save(db, tables.requests, request.id, request, { company_id: actor.companyId });
   return request;
+}
+
+function newPurchaseRequest(buyerId: string, details: RequestDraft): PurchaseRequest {
+  const createdAt = now();
+  return { id: randomUUID(), buyerId, draft: details, status: 'draft', createdAt,
+    matches: [], supplierIds: [], activity: [{ title: 'Purchase request saved', at: createdAt }] };
+}
+
+export async function createMultiRequest(db: DbSession, actor: Actor, input: unknown) {
+  requireRole(actor, 'owner', 'purchaser');
+  requireCapability(await actorCompany(actor, db), 'buyer');
+  const { groupId, drafts, label = 'Grouped purchase' } = parse(z.object({
+    groupId: z.uuid(), drafts: z.array(draft).min(2).max(12), label: z.string().trim().min(1).max(100).optional(),
+  }), input);
+  const existing = await records<PurchaseRequest>(db, tables.requests, sql`company_id = ${actor.companyId} and data ? 'group'
+    and data->'group'->>'id' = ${groupId} order by (data->'group'->>'lineNumber')::integer`);
+  if (existing.length) {
+    if (existing.length !== drafts.length || existing.some((request, index) =>
+      request.group?.label !== label || JSON.stringify(parse(draft, request.draft)) !== JSON.stringify(drafts[index]))) {
+      throw new MarketplaceError('This grouped purchase has already been submitted with different details.', 409);
+    }
+    return { groupId, requests: existing };
+  }
+  const today = dateIn(0);
+  if (drafts.some((line) => line.requiredDate < today)) throw new MarketplaceError('Every product needs a required date of today or later.', 422);
+  const requests: PurchaseRequest[] = [];
+  for (const [index, details] of drafts.entries()) {
+    const request = newPurchaseRequest(actor.companyId, details);
+    request.group = { id: groupId, label, lineNumber: index + 1, lineCount: drafts.length };
+    await save(db, tables.requests, request.id, request, { company_id: actor.companyId });
+    requests.push(await queueMatching(db, request));
+  }
+  await audit(db, actor, 'create_grouped_purchase', groupId, { lineCount: requests.length });
+  return { groupId, requests };
 }
 
 export async function enqueueMatch(db: DbSession, actor: Actor, requestId: string) {
@@ -27,11 +60,15 @@ export async function enqueueMatch(db: DbSession, actor: Actor, requestId: strin
   const request = await buyerRequest(db, actor, requestId);
   if (request.status === 'matching') return request;
   if (!['draft', 'matched'].includes(request.status)) throw new MarketplaceError('This request has already been sent.', 409);
+  return queueMatching(db, request);
+}
+
+async function queueMatching(db: DbSession, request: PurchaseRequest) {
   request.status = 'matching';
   request.activity.push({ title: 'Supplier matching queued', at: now() });
-  const job: MatchingJob = { id: randomUUID(), requestId, status: 'queued', createdAt: now() };
-  await save(db, tables.jobs, job.id, job, { request_id: requestId });
-  await update(db, tables.requests, requestId, request);
+  const job: MatchingJob = { id: randomUUID(), requestId: request.id, status: 'queued', createdAt: now() };
+  await save(db, tables.jobs, job.id, job, { request_id: request.id });
+  await update(db, tables.requests, request.id, request);
   return request;
 }
 
@@ -202,7 +239,8 @@ export async function saveListing(db: DbSession, actor: Actor, input: unknown) {
   const company = await actorCompany(actor, db);
   requireCapability(company, 'supplier');
   const existing = fields.id ? requireFound((await records<Listing>(db, tables.listings, sql`id = ${fields.id} and company_id = ${actor.companyId}`))[0]) : undefined;
-  const listing: Listing = { ...fields, id: existing?.id ?? randomUUID(), supplierId: company.id, demo: company.demo, updatedAt: now() };
+  const listing: Listing = { ...fields, id: existing?.id ?? randomUUID(), supplierId: company.id, demo: company.demo,
+    image: existing?.image, updatedAt: now() };
   await save(db, tables.listings, listing.id, listing, { company_id: company.id });
   const adjustment = listing.available - (existing?.available ?? 0);
   if (adjustment) await save(db, tables.movements, randomUUID(), { kind: 'adjustment', quantity: adjustment, createdAt: now() }, { listing_id: listing.id });

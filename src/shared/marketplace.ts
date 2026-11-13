@@ -1,5 +1,6 @@
 import type { EscrowStatus } from '../integrations/escrow/shared';
 import type { XrplState } from './xrpl';
+import type { RequestConversation } from './request-chat';
 
 export const initialMarket = { country: 'ZA', currency: 'ZAR' } as const;
 
@@ -25,6 +26,7 @@ export interface Actor {
   id: string;
   name: string;
   email: string;
+  emailVerified?: boolean;
   companyId: string;
   role: CompanyRole;
   demoRole?: DemoRole;
@@ -114,6 +116,8 @@ export interface PurchaseRequest {
   matches: Match[];
   supplierIds: string[];
   supplierResponses?: SupplierResponse[];
+  conversations?: RequestConversation[];
+  group?: { id: string; label: string; lineNumber: number; lineCount: number };
   activity: { title: string; at: string }[];
 }
 
@@ -260,6 +264,7 @@ export interface MarketplaceState {
   team: { id: string; name: string; email: string; role: CompanyRole }[];
   verificationHistory?: VerificationCheck[];
   verificationProvider?: { sandbox: boolean; scopes: VerificationScope[] };
+  accountEmailAvailable?: boolean;
 }
 
 export interface DeliveryAuthorization {

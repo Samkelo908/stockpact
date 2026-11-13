@@ -28,10 +28,10 @@ function catalogueIcon(category: string) {
 }
 
 function CataloguePhoto({ listing }: { listing: Listing }) {
-  const [failed, setFailed] = useState(false);
-  const source = listing.demo ? cataloguePhotos[listing.id] : undefined;
-  return source && !failed
-    ? <Image src={source} alt="" fill unoptimized onError={() => setFailed(true)} />
+  const [failedSource, setFailedSource] = useState<string>();
+  const source = listing.image?.startsWith('/api/listing-photo?') ? listing.image : listing.demo ? cataloguePhotos[listing.id] : undefined;
+  return source && failedSource !== source
+    ? <Image src={source} alt="" fill unoptimized sizes="(max-width: 600px) 100vw, 320px" onError={() => setFailedSource(source)} />
     : createElement(catalogueIcon(listing.category), { size: 40, strokeWidth: 1.4, "aria-hidden": true });
 }
 
@@ -218,21 +218,31 @@ export function Inventory({ state, busy, run, navigate }: CatalogueProps) {
 }
 
 function ListingForm({ listing, location, busy, run, onClose }: { listing?: Listing; location?: string; busy: string; run: RunAction; onClose: () => void }) {
+  const [photoName, setPhotoName] = useState('');
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const values = new FormData(event.currentTarget);
     const value = (key: string) => String(values.get(key) ?? "").trim();
     const input: ListingInput = { id: listing?.id, name: value("name"), category: value("category"), description: value("description"), unit: value("unit"), priceCents: value("price") ? cents(value("price")) : null, available: Number(value("available")), minimum: Number(value("minimum")), packSize: Number(value("packSize")), deliveryAreas: value("deliveryAreas").split(",").map((area) => area.trim()).filter(Boolean), leadDays: Number(value("leadDays")), deliveryFeeCents: cents(value("deliveryFee")), collection: values.has("collection"), surplus: values.has("surplus"), archived: values.has("archived"), brand: value("brand") };
+    const photo = values.get('photo');
+    if (photo instanceof File && photo.size) {
+      const upload = new FormData();
+      upload.set('photo', photo);
+      upload.set('listing', JSON.stringify(input));
+      if (await run('saveListingPhoto', upload, 'Listing and photo saved.')) onClose();
+      return;
+    }
     if (await run("saveListing", { listing: input }, "Listing saved.")) onClose();
   }
   return <Dialog title={listing ? "Edit listing" : "Create stock listing"} onClose={onClose}><form className="stack" onSubmit={(event) => void submit(event)}><div className="form-grid">
     <label className="field full">Product name<input name="name" minLength={2} maxLength={180} defaultValue={listing?.name} required /></label><label className="field">Category<input name="category" maxLength={90} defaultValue={listing?.category} required /></label><label className="field">Brand<input name="brand" maxLength={100} defaultValue={listing?.brand} /></label>
+    <label className="field full">{listing?.image ? 'Replace product photo' : 'Product photo'}<input name="photo" type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setPhotoName(event.currentTarget.files?.[0]?.name ?? '')} /><small>{photoName || (listing?.image ? 'The current photo stays if you leave this blank.' : 'Optional. JPEG, PNG or WebP up to 8 MB.')}</small></label>
     <label className="field full">Description and specifications<textarea name="description" maxLength={2000} defaultValue={listing?.description} /></label><label className="field">Unit<input name="unit" maxLength={40} defaultValue={listing?.unit ?? "cases"} required /></label><label className="field">Units per pack<input name="packSize" type="number" min="1" max="100000" defaultValue={listing?.packSize ?? 1} required /></label>
     <label className="field">Available quantity<input name="available" type="number" min="0" max="1000000" defaultValue={listing?.available ?? 0} required /></label><label className="field">Minimum order<input name="minimum" type="number" min="1" max="100000" defaultValue={listing?.minimum ?? 1} required /></label>
     <label className="field">Listed price (ZAR)<input name="price" type="number" min="0" max="1000000" step="0.01" defaultValue={listing?.priceCents == null ? "" : listing.priceCents / 100} /><small>Leave blank to request a quote.</small></label><label className="field">Delivery fee (ZAR)<input name="deliveryFee" type="number" min="0" max="1000000" step="0.01" defaultValue={(listing?.deliveryFeeCents ?? 0) / 100} required /></label>
     <label className="field">Lead time (days)<input name="leadDays" type="number" min="0" max="365" defaultValue={listing?.leadDays ?? 1} required /></label><label className="field">Delivery areas<input name="deliveryAreas" defaultValue={listing?.deliveryAreas.join(", ") || location} /><small>Separate areas with commas.</small></label>
     <label className="check"><input type="checkbox" name="collection" defaultChecked={listing?.collection ?? true} />Offer collection</label><label className="check"><input type="checkbox" name="surplus" defaultChecked={listing?.surplus ?? false} />Surplus stock</label>{listing && <label className="check"><input type="checkbox" name="archived" defaultChecked={listing.archived} />Archive listing</label>}
-  </div><div><button type="submit" className="primary" disabled={!!busy}>Save listing</button></div></form></Dialog>;
+  </div><div><button type="submit" className="primary" disabled={!!busy}>{busy === 'saveListingPhoto' ? 'Saving photo…' : 'Save listing'}</button></div></form></Dialog>;
 }
 
 function ImportListings({ busy, run, onClose }: { busy: string; run: RunAction; onClose: () => void }) {

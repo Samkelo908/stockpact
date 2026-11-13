@@ -27,9 +27,19 @@ function authOrigin() {
   return url;
 }
 
+async function sendAccountEmail(webhook: string, type: 'email_verification' | 'password_reset', to: string, url: string) {
+  const response = await fetch(webhook, {
+    method: 'POST', headers: { 'content-type': 'application/json',
+      ...(process.env.STOCKPACT_EMAIL_SECRET ? { authorization: `Bearer ${process.env.STOCKPACT_EMAIL_SECRET}` } : {}) },
+    body: JSON.stringify({ type, to, url }),
+    redirect: 'error', signal: AbortSignal.timeout(8000),
+  });
+  if (!response.ok) throw new Error('Account email could not be sent.');
+}
+
 function createAuth(database: DbSession, registrationTransaction = false) {
   const origin = authOrigin();
-  const resetUrl = process.env.STOCKPACT_EMAIL_WEBHOOK;
+  const emailWebhook = process.env.STOCKPACT_EMAIL_WEBHOOK;
   return betterAuth({
     database: { db: database, type: 'postgres', transaction: !registrationTransaction },
     baseURL: origin.origin,
@@ -38,23 +48,22 @@ function createAuth(database: DbSession, registrationTransaction = false) {
       enabled: true,
       minPasswordLength: 10,
       revokeSessionsOnPasswordReset: true,
-      ...(resetUrl ? {
+      ...(emailWebhook ? {
         resetPasswordTokenExpiresIn: 1800,
         sendResetPassword: async ({ user, url }: { user: { email: string }; url: string }) => {
           try {
-            const response = await fetch(resetUrl, {
-              method: 'POST', headers: { 'content-type': 'application/json',
-                ...(process.env.STOCKPACT_EMAIL_SECRET ? { authorization: `Bearer ${process.env.STOCKPACT_EMAIL_SECRET}` } : {}) },
-              body: JSON.stringify({ type: 'password_reset', to: user.email, url }),
-              redirect: 'error', signal: AbortSignal.timeout(8000),
-            });
-            if (!response.ok) throw new Error();
+            await sendAccountEmail(emailWebhook, 'password_reset', user.email, url);
           } catch {
             console.error('StockPact password recovery delivery failed.');
           }
         },
       } : {}),
     },
+    ...(emailWebhook && !registrationTransaction ? { emailVerification: {
+      expiresIn: 1800,
+      sendVerificationEmail: ({ user, url }: { user: { email: string }; url: string }) =>
+        sendAccountEmail(emailWebhook, 'email_verification', user.email, url),
+    } } : {}),
     advanced: {
       useSecureCookies: origin.protocol === 'https:',
       // The scoped adapter uses the caller's transaction and cannot open a connection for schema introspection.
@@ -73,14 +82,15 @@ export async function getAuth() {
   return authCache.stockpactAuth;
 }
 
-export async function actorForUser(user: { id: string; name: string; email: string }, selectedCompanyId?: string): Promise<Actor | null> {
+export async function actorForUser(user: { id: string; name: string; email: string; emailVerified?: boolean }, selectedCompanyId?: string): Promise<Actor | null> {
   const db = await getDb();
   const result = await sql<Actor['memberships'][number]>`select m.company_id as "companyId", c.data->>'name' as "companyName", m.role
     from memberships m join companies c on c.id = m.company_id where m.user_id = ${user.id} and c.demo = false
     order by m.id`.execute(db);
   const membership = result.rows.find(({ companyId }) => companyId === selectedCompanyId) ?? result.rows[0];
   if (!membership) return null;
-  return { id: user.id, name: user.name, email: user.email, companyId: membership.companyId, role: membership.role, memberships: result.rows };
+  return { id: user.id, name: user.name, email: user.email, emailVerified: user.emailVerified === true,
+    companyId: membership.companyId, role: membership.role, memberships: result.rows };
 }
 
 export async function getActor(): Promise<Actor | null> {
@@ -122,7 +132,7 @@ export async function registerCompanyAccount(input: { name: string; email: strin
     const { id, name, email } = response.user;
     await save(db, tables.companies, companyId, company, { demo: false });
     await addMembership(db, companyId, id, 'owner');
-    const actor: Actor = { id, name, email, companyId, role: 'owner', memberships: [{ companyId, companyName, role: 'owner' }] };
+    const actor: Actor = { id, name, email, emailVerified: false, companyId, role: 'owner', memberships: [{ companyId, companyName, role: 'owner' }] };
     return { actor, sessionHeaders };
   });
 }

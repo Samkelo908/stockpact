@@ -31,6 +31,10 @@ export function xrplAmount(cents: number, dropsPerCent: number | undefined) {
   return `${fromDrops(BigInt(cents) * BigInt(dropsPerCent))} test XRP`;
 }
 
+export function formatXrplDrops(drops: string | bigint) {
+  return `${fromDrops(typeof drops === "string" ? wholeDrops(drops) : drops)} test XRP`;
+}
+
 function explorerLink(base: string | undefined, hash: string | undefined) {
   if (!base || !hash || !/^[0-9a-f]{64}$/i.test(hash)) return undefined;
   try {
@@ -114,7 +118,7 @@ export function XrplMandates({ state, busy, run }: { state: MarketplaceState; bu
   </section>;
 }
 
-const attemptStatuses: Record<XrplAttempt["status"], { label: string; tint: "green" | "amber" | "blue" | "red" }> = {
+export const attemptStatuses: Record<XrplAttempt["status"], { label: string; tint: "green" | "amber" | "blue" | "red" }> = {
   queued: { label: "Queued for decision", tint: "blue" },
   processing: { label: "Checking payment", tint: "blue" },
   pending: { label: "Awaiting ledger validation", tint: "amber" },
@@ -124,31 +128,60 @@ const attemptStatuses: Record<XrplAttempt["status"], { label: string; tint: "gre
   blocked: { label: "Payment denied", tint: "red" },
 };
 
-function Attempt({ attempt, state, run, busy, allowRetry, navigate }: { attempt: XrplAttempt; state: MarketplaceState; run: RunAction; busy: string; allowRetry: boolean; navigate?: Navigate }) {
+export function xrplOrderPayment(state: MarketplaceState, order: Order) {
+  if (order.paymentMode !== "xrpl" || !state.actor || ["driver", "reviewer"].includes(state.actor.role)) return undefined;
+  const attempts = (state.xrpl?.attempts ?? []).filter((attempt) => attempt.orderId === order.id);
+  const confirmed = attempts.filter(({ status }) => status === "confirmed").reduce((total, attempt) => total + wholeDrops(attempt.drops), 0n);
+  const blocked = attempts.some(({ status }) => ["blocked", "failed", "expired"].includes(status));
+  const processing = attempts.some(({ status }) => ["queued", "processing", "pending"].includes(status));
+  const dropsPerCent = state.xrpl?.dropsPerZarCent;
+  const deliveredValue = Number.isSafeInteger(dropsPerCent) && dropsPerCent && order.quantity > 0
+    ? (BigInt(order.totalCents) * BigInt(order.acceptedQuantity) / BigInt(order.quantity)) * BigInt(dropsPerCent)
+    : undefined;
+  const unpaid = deliveredValue === undefined ? undefined : confirmed >= deliveredValue ? 0n : deliveredValue - confirmed;
+  const unconfirmed = unpaid === undefined || unpaid > 0n;
+  const label = !order.acceptedQuantity ? "Awaiting handover" : blocked ? "Payment action needed"
+    : processing ? "Payment pending" : unconfirmed ? "Payment unconfirmed" : "Accepted handovers paid";
+  const variant = !order.acceptedQuantity ? "grey" : blocked ? "red" : processing || unconfirmed ? "amber" : "green";
+  return { attempts, confirmed, unpaid, label, variant } as const;
+}
+
+function Attempt({ attempt, state, run, busy, isBuyerOwner, navigate, showOrder }: { attempt: XrplAttempt; state: MarketplaceState; run: RunAction; busy: string; isBuyerOwner: boolean; navigate?: Navigate; showOrder: boolean }) {
   const status = attemptStatuses[attempt.status];
   const order = state.orders.find((item) => item.id === attempt.orderId);
-  const link = attempt.status === "confirmed" && attempt.ledgerIndex != null ? explorerLink(state.xrpl?.explorerUrl, attempt.hash) : undefined;
+  const link = attempt.status === "confirmed" && attempt.ledgerIndex != null ? explorerLink(state.xrpl?.explorerUrl ?? "https://testnet.xrpl.org", attempt.hash) : undefined;
+  const checkStatus = isBuyerOwner && ["queued", "processing", "pending"].includes(attempt.status);
+  const unsignedBlocked = attempt.status === "blocked" && !attempt.hash;
+  const requeue = unsignedBlocked && isBuyerOwner && state.xrpl?.configured;
+  const canReviewMandate = unsignedBlocked && isBuyerOwner && navigate;
+  const canOpenOrder = showOrder && navigate;
   return <article className="subcard small-stack xrpl-attempt">
-    <div className="split-line"><div><h3>{fromDrops(wholeDrops(attempt.drops))} test XRP</h3><p>{order?.reference && `${order.reference} · `}{dateLabel(attempt.updatedAt)}</p></div><Tag value={status.label} variant={status.tint} /></div>
+    <div className="split-line"><div><h3>{formatXrplDrops(attempt.drops)}</h3><p>{order?.reference && `${order.reference} · `}{dateLabel(attempt.updatedAt)}</p></div><Tag value={status.label} variant={status.tint} /></div>
     {attempt.reason && <p>{attempt.reason}</p>}
     {attempt.status === "processing" && <Busy label="Checking mandate and handover" />}
+    {attempt.status === "pending" && <p className="small-note">StockPact is checking the original transaction. Keep this handover record and check again after validation.</p>}
+    {unsignedBlocked && <p className="small-note">{isBuyerOwner ? "Review the reason and supplier mandate, then request another decision for this handover." : "Ask the buyer to review the supplier mandate and request another payment decision."}</p>}
+    {attempt.hash && ["failed", "expired", "blocked"].includes(attempt.status) && <p className="small-note">{isBuyerOwner ? "Keep this transaction reference and contact your workspace operator to review the result." : "Share this transaction reference with the buyer for review."}</p>}
     {attempt.status === "confirmed" && <dl className="details-grid"><div><dt>Validated ledger</dt><dd>{attempt.ledgerIndex ?? "—"}</dd></div><div><dt>Destination</dt><dd className="xrpl-address">{attempt.recipient || "—"}</dd></div></dl>}
     {attempt.hash && <p className="xrpl-address" aria-label="XRPL transaction hash">{attempt.hash}</p>}
-    {(link || (allowRetry && ["queued", "pending"].includes(attempt.status)) || navigate) && <div className="button-row">
+    {(link || checkStatus || requeue || canReviewMandate || canOpenOrder) && <div className="button-row">
       {link && <a className="secondary" href={link} target="_blank" rel="noreferrer">View Testnet receipt <ExternalLink size={15} /></a>}
-      {allowRetry && ["queued", "pending"].includes(attempt.status) && <button type="button" className="secondary" disabled={!!busy} onClick={() => void run("retryXrplPayment", { attemptId: attempt.id })}><RotateCw size={15} />Check payment status</button>}
-      {navigate && <button type="button" className="secondary" onClick={() => navigate("orders", attempt.orderId)}>Open order <ArrowRight size={15} /></button>}
+      {checkStatus && <button type="button" className="secondary" disabled={!!busy} onClick={() => void run("retryXrplPayment", { attemptId: attempt.id })}><RotateCw size={15} />Check payment status</button>}
+      {requeue && <button type="button" className="primary" disabled={!!busy} onClick={() => void run("requeueXrplPayment", { attemptId: attempt.id }, "Payment decision requested for the original handover.")}><RotateCw size={15} />Request payment again</button>}
+      {canReviewMandate && <button type="button" className="secondary" onClick={() => navigate("settings", "xrpl")}>Review mandate <ArrowRight size={15} /></button>}
+      {canOpenOrder && <button type="button" className="secondary" onClick={() => navigate("orders", attempt.orderId)}>Open order <ArrowRight size={15} /></button>}
     </div>}
   </article>;
 }
 
 export function XrplActivity({ state, order, navigate, busy, run }: { state: MarketplaceState; order?: Order; navigate?: Navigate; busy: string; run: RunAction }) {
+  if (order && !xrplOrderPayment(state, order)) return null;
   const config = state.xrpl;
   const attempts = (config?.attempts ?? []).filter((item) => !order || item.orderId === order.id).toSorted((first, second) => second.createdAt.localeCompare(first.createdAt));
-  if (order ? order.paymentMode !== "xrpl" && !attempts.length : !attempts.length) return null;
-  return <section className="card panel stack xrpl-panel"><PanelTitle title="XRPL Testnet activity" subtitle="See each autopay decision and confirm successful payments on the XRP Ledger Testnet." />
+  if (!order && !attempts.length) return null;
+  return <section className="card panel stack xrpl-panel"><PanelTitle title="XRPL Testnet activity" subtitle="Accepted deliveries and validated payments are recorded separately." />
     {!attempts.length && <p className="small-note">Autopay is checked after the supplier or assigned driver accepts the handover QR.</p>}
-    {attempts.slice(0, order ? 15 : 5).map((attempt) => <Attempt key={attempt.id} attempt={attempt} state={state} busy={busy} run={run} allowRetry={state.actor?.role === "owner" && (order ?? state.orders.find((item) => item.id === attempt.orderId))?.buyerId === state.actor.companyId} navigate={navigate} />)}
+    {attempts.slice(0, order ? 15 : 5).map((attempt) => <Attempt key={attempt.id} attempt={attempt} state={state} busy={busy} run={run} isBuyerOwner={state.actor?.role === "owner" && (order ?? state.orders.find((item) => item.id === attempt.orderId))?.buyerId === state.actor.companyId} navigate={navigate} showOrder={!order} />)}
   </section>;
 }
 
@@ -165,7 +198,10 @@ export function XrplCheckout({ state, order, busy, run, navigate, onDone }: { st
 }
 
 export function orderStateLabel(order: Pick<Order, "paymentMode" | "status">) {
-  return order.paymentMode === "xrpl" && order.status === "funded" ? "Ready for dispatch" : order.status;
+  if (order.paymentMode !== "xrpl") return order.status;
+  if (order.status === "funded") return "Ready for dispatch";
+  if (order.status === "partial") return "Partial delivery";
+  return order.status === "completed" ? "Delivery complete" : order.status;
 }
 
 export function isXrplAvailable(state: MarketplaceState, order: Order) {

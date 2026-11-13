@@ -9,7 +9,7 @@ import { getDb, mutate } from '../src/server/db';
 import { authorizeDelivery, dispatchOrder, enableXrplOrder, redeemDelivery } from '../src/server/orders';
 import { acceptQuote } from '../src/server/procurement';
 import { demoAccounts, ensureDemoSeed } from '../src/server/seed';
-import { getXrplState, pauseXrplMandate, runXrplJobs, stageXrplIntent, upsertXrplMandate, type XrplDecisionProvider } from '../src/server/xrpl';
+import { getXrplState, pauseXrplMandate, requeueXrplPayment, runXrplJobs, stageXrplIntent, upsertXrplMandate, type XrplDecisionProvider } from '../src/server/xrpl';
 import type { Actor } from '../src/shared/marketplace';
 
 const rpcUrl = 'https://s.altnet.rippletest.net:51234/';
@@ -68,6 +68,7 @@ test('XRPL jobs pin a supplier, persist one signed blob, confirm exactly once, a
 
   let decisions = 0;
   let confirms = false;
+  let denySecond = false;
   const broadcast: string[] = [];
   const decision: XrplDecisionProvider = async (evidence) => {
     decisions++;
@@ -76,7 +77,7 @@ test('XRPL jobs pin a supplier, persist one signed blob, confirm exactly once, a
     assert.equal(evidence.drops, evidence.attemptId === first ? staged.drops : '1780000');
     assert.equal(Object.isFrozen(evidence), true);
     assert.equal('recipient' in evidence, false);
-    return { requestPayment: true, reason: 'No browser or signer should receive this raw text.' };
+    return { requestPayment: !(denySecond && evidence.attemptId === second), reason: 'No browser or signer should receive this raw text.' };
   };
   const body = (result: object) => Response.json({ result });
   t.mock.method(globalThis, 'fetch', async (input: string, init: RequestInit) => {
@@ -106,11 +107,15 @@ test('XRPL jobs pin a supplier, persist one signed blob, confirm exactly once, a
   const pending = (await getXrplState(buyer)).attempts.find((item) => item.id === first)!;
   assert.equal(pending.status, 'pending');
   assert.equal('signed' in pending, false);
+  await assert.rejects(mutate((db) => requeueXrplPayment(db, buyer, { attemptId: first })), /never signed/);
   assert.equal((await getXrplState(buyer)).mandates[0].reservedDrops, staged.drops);
   const blocked = await runXrplJobs(decision, { attemptId: second });
   assert.equal(blocked.attempt?.status, 'blocked');
   assert.match(blocked.attempt?.reason ?? '', /remaining total/);
   assert.equal(decisions, 2);
+  await assert.rejects(mutate((db) => requeueXrplPayment(db, supplier, { attemptId: second })), /not found/);
+  await assert.rejects(mutate((db) => requeueXrplPayment(db, { ...buyer, role: 'approver' }, { attemptId: second })), /Your role/);
+  await assert.rejects(mutate((db) => requeueXrplPayment(db, buyer, { attemptId: second })), /remaining total/);
 
   await mutate((db) => pauseXrplMandate(db, buyer, { mandateId: mandate.id, paused: true }));
   await sql`update xrpl_payment_attempts set next_attempt_at = now() where id = ${first}`.execute(await getDb());
@@ -130,4 +135,29 @@ test('XRPL jobs pin a supplier, persist one signed blob, confirm exactly once, a
   assert.equal(final.usedDrops, staged.drops);
   assert.equal(final.reservedDrops, '0');
   assert.equal(final.paused, true);
+  await assert.rejects(mutate((db) => requeueXrplPayment(db, buyer, { attemptId: first })), /never signed/);
+  await assert.rejects(mutate((db) => requeueXrplPayment(db, buyer, { attemptId: second })), /paused/);
+  await mutate((db) => upsertXrplMandate(db, buyer, { ...input, totalDrops: '5000000' }));
+  await mutate((db) => pauseXrplMandate(db, buyer, { mandateId: mandate.id, paused: false }));
+  const requeues = await Promise.allSettled([mutate((db) => requeueXrplPayment(db, buyer, { attemptId: second })),
+    mutate((db) => requeueXrplPayment(db, buyer, { attemptId: second }))]);
+  assert.equal(requeues.filter(({ status }) => status === 'fulfilled').length, 1);
+  assert.ok(requeues.some((result) => result.status === 'fulfilled' && result.value.xrplAttemptId === second));
+  const queued = (await getXrplState(supplier)).attempts.find((item) => item.id === second)!;
+  assert.equal(queued.status, 'queued');
+  assert.equal(queued.drops, '1780000');
+  assert.equal(queued.destinationTag, 0);
+  assert.equal(queued.recipient, recipient.address);
+  assert.equal(queued.hash, undefined);
+  const audit = await sql<{ data: { actorId: string } }>`select data from audit_events where company_id = ${buyer.companyId}
+    and data->>'action' = 'xrpl_payment_requeued' and data->>'recordId' = ${second}`.execute(await getDb());
+  assert.equal(audit.rows.length, 1);
+  assert.equal(audit.rows[0].data.actorId, buyer.id);
+
+  denySecond = true;
+  const freshDecision = await runXrplJobs(decision, { attemptId: second });
+  assert.equal(freshDecision.attempt?.status, 'blocked');
+  assert.match(freshDecision.attempt?.reason ?? '', /did not request/);
+  assert.equal(decisions, 3);
+  assert.equal(broadcast.length, 1);
 });

@@ -1,11 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import { sql } from 'kysely';
+import { z } from 'zod';
 import {
   confirmXrplPayment, prepareXrplPayment, submitXrplPayment, type SignedXrplPayment, type XrplPaymentResult,
 } from '../integrations/xrpl/server';
 import type { XrplAttempt } from '../shared/xrpl';
-import { MarketplaceError, notify } from './access';
+import type { Actor } from '../shared/marketplace';
+import { audit, MarketplaceError, notify, requireRole } from './access';
 import { getDb, mutate, type DbSession } from './db';
+import { id, parse } from './inputs';
 import {
   attemptColumns, auditXrpl, paymentEvidence, publicAttempt, verifyXrplEvidence, verifyXrplIntent, type AttemptRow, type XrplDecisionProvider,
 } from './xrpl-policy';
@@ -23,6 +26,31 @@ const terminal = (status: XrplAttempt['status']) => ['confirmed', 'failed', 'exp
 async function getJob(db: DbSession, attemptId: string, filter: JobFilter = {}) {
   return (await sql<Job>`select ${jobColumns} from xrpl_payment_attempts where id = ${attemptId}
     ${filter.companyId ? sql`and buyer_id = ${filter.companyId}` : sql``}`.execute(db)).rows[0];
+}
+
+function assertMandateBalance(job: Job, policy: Policy) {
+  const { mandate, amount } = policy;
+  if (BigInt(mandate.used_drops) + BigInt(mandate.reserved_drops) - BigInt(job.hold_drops) + amount > BigInt(mandate.total_drops)) {
+    throw new MarketplaceError('The accepted handover exceeds the remaining total mandate cap.', 409);
+  }
+}
+
+export async function requeueXrplPayment(db: DbSession, actor: Actor, input: unknown): Promise<{ xrplAttemptId: string }> {
+  requireRole(actor, 'owner');
+  if (!actor.demoRole) throw new MarketplaceError('XRPL Testnet autopay is available in the fictional workspace.', 403);
+  const { attemptId } = parse(z.object({ attemptId: id }), input);
+  const job = await getJob(db, attemptId, { companyId: actor.companyId });
+  if (!job) throw new MarketplaceError('This test payment was not found in your buyer workspace.', 404);
+  if (job.status !== 'blocked' || job.signed || job.tx_hash || job.submitted_at || BigInt(job.hold_drops) !== 0n) {
+    throw new MarketplaceError('Only a blocked payment that was never signed can be requested again.', 409);
+  }
+  const policy = await verifyXrplIntent(db, job);
+  assertMandateBalance(job, policy);
+  await sql`update xrpl_payment_attempts set status = 'queued', reason = 'Buyer requested a fresh payment decision.',
+    agent_approved = null, agent_reason = null, signer_account = null, next_attempt_at = now(), updated_at = now(),
+    lease_id = null, lease_until = null where id = ${job.id}`.execute(db);
+  await audit(db, actor, 'xrpl_payment_requeued', job.id, { orderId: job.order_id, sourceId: job.source_id });
+  return { xrplAttemptId: job.id };
 }
 
 async function claimJob(filter: JobFilter) {
@@ -76,9 +104,7 @@ async function finish(db: DbSession, job: Job, status: 'confirmed' | 'failed' | 
 async function policyOrDefer(db: DbSession, job: Job): Promise<Policy | null> {
   try {
     const policy = await verifyXrplIntent(db, job);
-    if (BigInt(policy.mandate.used_drops) + BigInt(policy.mandate.reserved_drops) - BigInt(job.hold_drops) + policy.amount > BigInt(policy.mandate.total_drops)) {
-      throw new MarketplaceError('The accepted handover exceeds the remaining total mandate cap.', 409);
-    }
+    assertMandateBalance(job, policy);
     return policy;
   } catch (error) {
     if (!(error instanceof MarketplaceError)) throw error;

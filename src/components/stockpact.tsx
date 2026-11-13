@@ -95,14 +95,16 @@ export function StockPact() {
     setDialog(null);
   };
 
-  const run: RunAction = async <T,>(action: string, values?: Record<string, unknown>, success?: string) => {
+  const run: RunAction = async <T,>(action: string, values?: Record<string, unknown> | FormData, success?: string) => {
     if (actionActive.current) return null;
     actionActive.current = true;
     revision.current += 1;
     setBusy(action);
     setNotice(null);
     try {
-      const response = await fetch("/api/actions", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...values, action }) });
+      const response = action === "saveListingPhoto" && values instanceof FormData
+        ? await fetch("/api/listing-photo", { method: "POST", body: values })
+        : await fetch("/api/actions", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...values, action }) });
       const result = await response.json() as Result<T> & { error?: string };
       if (result.state) setState(result.state);
       if (!response.ok || result.error) throw new Error(result.error || "That action could not be completed. Try again.");

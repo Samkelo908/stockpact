@@ -177,6 +177,8 @@ export async function inviteMember(db: DbSession, actor: Actor, input: unknown) 
 
 export async function acceptInvitation(db: DbSession, actor: Actor, input: unknown) {
   if (actor.demoRole) throw new MarketplaceError('Sign in to a registered account to accept an invitation.', 403);
+  const account = (await sql<{ verified: boolean }>`select "emailVerified" as verified from "user" where id = ${actor.id}`.execute(db)).rows[0];
+  if (!account?.verified) throw new MarketplaceError('Verify your account email in Company settings before joining another company.', 403);
   const { code } = parse(z.object({ code: z.string().regex(/^[\da-f]{64}$/i) }), input);
   const invite = requireFound(await record<Invitation>(db, tables.team, code));
   if (invite.email !== actor.email.toLowerCase() || invite.used || Date.parse(invite.expiresAt) <= Date.now()) {
@@ -185,4 +187,18 @@ export async function acceptInvitation(db: DbSession, actor: Actor, input: unkno
   await addMembership(db, invite.companyId, actor.id, invite.role);
   await update(db, tables.team, code, { ...invite, used: true });
   await audit(db, actor, 'accept_invitation', invite.companyId);
+}
+
+export async function removeTeamMember(db: DbSession, actor: Actor, input: unknown) {
+  requireRole(actor, 'owner');
+  if (actor.demoRole) throw new MarketplaceError('Demo team membership is fixed.', 403);
+  const { memberId } = parse(z.object({ memberId: id }), input);
+  const membership = await sql<{ role: string }>`delete from memberships where company_id = ${actor.companyId}
+    and user_id = ${memberId} and role in ('purchaser', 'approver', 'sales', 'driver') returning role`.execute(db);
+  if (!membership.rows.length) throw new MarketplaceError('Choose a staff member from this company.', 404);
+  if (membership.rows[0].role === 'driver') {
+    await sql`update orders set data = data - 'driverId' where supplier_id = ${actor.companyId}
+      and data->>'driverId' = ${memberId} and data->>'status' in ('funded','dispatched','partial','disputed')`.execute(db);
+  }
+  await audit(db, actor, 'remove_team_member', memberId);
 }

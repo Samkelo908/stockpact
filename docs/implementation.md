@@ -7,7 +7,10 @@
 - [x] Authenticated private order attachments, in-app notices, reviews and manual dispute and verification queues.
 - [ ] Configure and verify a live Workers AI account, private R2 bucket, Persona templates and webhook, email delivery and external PostgreSQL for a pilot.
 - [ ] Deploy the contracts to a funded testnet and validate wallet signing and live receipts with separate participants.
-- [ ] Extend supplier catalogue, negotiation and delivery-provider workflows for multi-line quotes and independent carrier allocation.
+- [x] Supplier photo uploads, private two-way quote conversations and grouped purchase requests with separately quoted and fulfilled lines.
+- [x] Separate delivery and XRPL payment status, with buyer recovery for unsigned payments blocked by a mandate.
+- [x] Account email verification for joining an invited company and owner controls for removing staff access.
+- [ ] Extend procurement to bundled supplier quotes and add independent carrier allocation.
 - [ ] Connect testnet driver assignment, dispute settlement, and timeout refunds from the contract to the application screens. Demo-mode reviewer and driver workflows are available in the app.
 - [ ] Complete production dispute operations, payment reconciliation, exchange-rate display and fiat rails before settling real value.
 

@@ -19,6 +19,7 @@ export function SettingsView({ state, busy, run, selected, navigate }: Common) {
   const [edit, setEdit] = useState(false);
   const [invite, setInvite] = useState(false);
   const [accept, setAccept] = useState(selected === "invite" || selected.startsWith("invite/"));
+  const [removeMember, setRemoveMember] = useState<MarketplaceState['team'][number] | null>(null);
   const owner = state.actor?.role === "owner";
   if (!company) return <ViewTitle title="Company settings" subtitle="No company is available for this account." />;
   const hostedScopes = state.verificationProvider && !state.verificationProvider.sandbox ? state.verificationProvider.scopes : [];
@@ -45,14 +46,22 @@ export function SettingsView({ state, busy, run, selected, navigate }: Common) {
       </div>
       <WalletRegistration state={state} run={run} busy={busy} />
       {selected !== "xrpl" && <XrplMandates state={state} run={run} busy={busy} />}
+      {!company.demo && state.actor && <section className="card panel stack">
+        <PanelTitle title="Account email" subtitle={state.actor.email} action={<Tag value={state.actor.emailVerified ? 'Verified' : 'Unverified'} />} />
+        {!state.actor.emailVerified && (state.accountEmailAvailable ? <div><button type="button" className="secondary" disabled={!!busy} onClick={() => void run('requestEmailVerification', {}, 'Verification link sent. Check your inbox.')}>Send verification link</button></div> : <p className="small-note">Ask the workspace administrator to enable verification emails before joining another company.</p>)}
+      </section>}
       <section className="card panel stack"><PanelTitle title="Team access" subtitle="Membership roles apply to the active company." />
-        <div className="table-wrap"><table className="data-table"><thead><tr><th>Member</th><th>Email</th><th>Role</th></tr></thead><tbody>{state.team.map((member) => <tr key={member.id}><td>{member.name}</td><td>{member.email}</td><td>{titleCase(member.role)}</td></tr>)}</tbody></table></div>
+        <div className="table-wrap"><table className="data-table"><thead><tr><th>Member</th><th>Email</th><th>Role</th>{owner && !company.demo && <th>Access</th>}</tr></thead><tbody>{state.team.map((member) => <tr key={member.id}><td>{member.name}</td><td>{member.email}</td><td>{titleCase(member.role)}</td>{owner && !company.demo && <td>{!['owner', 'reviewer'].includes(member.role) && <button type="button" className="secondary" aria-label={`Remove access for ${member.name}`} onClick={() => setRemoveMember(member)}>Remove</button>}</td>}</tr>)}</tbody></table></div>
         {!state.team.length && <Empty title="No other team members" detail="Company members and their roles are listed here." icon={Users} />}
         {!company.demo && <div className="button-row">{owner && <button type="button" className="primary" onClick={() => setInvite(true)}><Plus size={16} />Invite team member</button>}<button type="button" className="secondary" onClick={() => setAccept(true)}>Accept an invitation</button></div>}
       </section>
     </div>
     {edit && <CompanyForm company={company} busy={busy} run={run} onClose={() => setEdit(false)} />}
     {invite && <InvitationForm busy={busy} run={run} onClose={() => setInvite(false)} />}
+    {removeMember && <Dialog title="Remove company access" onClose={() => setRemoveMember(null)}><div className="stack">
+      <p>{removeMember.name} will lose access to {company.name}. Their previous activity stays in the company’s records.</p>
+      <div><button type="button" className="primary" disabled={!!busy} onClick={async () => { if (await run('removeTeamMember', { memberId: removeMember.id }, 'Company access removed.')) setRemoveMember(null); }}>Remove access</button></div>
+    </div></Dialog>}
     {accept && !company.demo && <Dialog title="Accept company invitation" onClose={() => { setAccept(false); if (selected.startsWith("invite")) navigate("settings"); }}><form className="stack" onSubmit={async (event) => { event.preventDefault(); const fields = new FormData(event.currentTarget); if (await run("acceptInvitation", { code: fields.get("code") }, "Invitation accepted. Open the account menu to switch companies.")) { setAccept(false); navigate("settings"); } }}><label className="field">Invitation code<input name="code" defaultValue={selected.startsWith("invite/") ? selected.slice(7) : ""} minLength={64} maxLength={64} required /></label><div><button type="submit" className="primary" disabled={!!busy}>Join company</button></div></form></Dialog>}
   </>;
 }

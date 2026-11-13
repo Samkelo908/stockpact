@@ -23,3 +23,5 @@ The build creates and verifies `artifacts/StockPact.apk`. Keep the signing key i
 This walkthrough uses fictional businesses and simulated funds. The protected demo link must stay online throughout the presentation. Rebuild against the replacement HTTPS origin if the demo link changes.
 
 For the Ripple track, follow the [XRPL Testnet walkthrough](../docs/ripple-demo.md) instead. That mode submits valueless test XRP to the native XRP Ledger and shows the validated receipt in the app.
+
+XRPL Testnet autopay runs on the workspace server and needs no wallet app on either phone. The order shows delivery and payment separately. The buyer owner can request another decision for a blocked handover before a transaction has been signed. The EVM escrow flow requires a browser with a connected EVM wallet.

@@ -27,19 +27,20 @@ export async function POST(request: Request) {
       throw new MarketplaceError('Choose a StockPact action.', 400);
     }
     const action = input.action;
-    if (['register', 'signIn', 'requestPasswordReset', 'resetPassword', 'draftRequest'].includes(action)) {
-      const actor = action === 'draftRequest' ? await getActor() : null;
+    if (['register', 'signIn', 'requestPasswordReset', 'resetPassword', 'draftRequest', 'requestEmailVerification'].includes(action)) {
+      const actor = action === 'draftRequest' || action === 'requestEmailVerification' ? await getActor() : null;
       const key = actor?.id ?? request.headers.get('x-real-ip') ?? request.headers.get('x-forwarded-for')?.split(',')[0] ?? 'local';
       const digest = createHash('sha256').update(`${action}:${key.slice(0, 120)}`).digest('hex');
-      if (!await actionLimit(digest, action === 'draftRequest' ? 25 : 12, 10)) throw new MarketplaceError('Too many attempts. Try again in ten minutes.', 429);
+      const maximum = action === 'requestEmailVerification' ? 4 : action === 'draftRequest' ? 25 : 12;
+      if (!await actionLimit(digest, maximum, 10)) throw new MarketplaceError('Too many attempts. Try again in ten minutes.', 429);
     }
     const result = await marketplaceAction(action, input);
     const actor = 'actor' in result ? result.actor ?? null : await getActor();
-    if (action === 'matchRequest' && actor) after(async () => { await runMatchingJobs(actor.companyId); });
-    if (actor && (action === 'redeemDelivery' || action === 'retryXrplPayment') && result.data &&
+    if ((action === 'matchRequest' || action === 'createMultiRequest') && actor) after(async () => { await runMatchingJobs(actor.companyId); });
+    if (actor && ['redeemDelivery', 'retryXrplPayment', 'requeueXrplPayment'].includes(action) && result.data &&
         typeof result.data === 'object' && 'xrplAttemptId' in result.data && typeof result.data.xrplAttemptId === 'string') {
       const attemptId = result.data.xrplAttemptId;
-      const companyId = action === 'retryXrplPayment' ? actor.companyId : undefined;
+      const companyId = action === 'redeemDelivery' ? undefined : actor.companyId;
       after(async () => { await runXrplJobs(decideXrplHandover, { attemptId, companyId }); });
     }
     const state = await marketplaceState(actor);

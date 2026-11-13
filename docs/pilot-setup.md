@@ -1,0 +1,15 @@
+# Private StockPact pilot
+
+Use a separate database and HTTPS origin for the pilot. The Android build opens the origin supplied to `android/build.ps1`. Both phones must reach that origin. A Cloudflare Quick Tunnel serves a demo while the host is online. Use a stable HTTPS endpoint before distributing the APK to businesses.
+
+## Database and hosting
+
+1. Provision Cloud SQL for PostgreSQL in the StockPact Firebase project. SQL Connect uses Cloud SQL to store the data. StockPact’s Node server uses its existing PostgreSQL connection, keeps its SQL migrations, and owns the authorization checks for quotes, messages and orders. The Android app talks to StockPact over HTTPS and does not carry database credentials. [Firebase SQL Connect database access](https://firebase.google.com/docs/sql-connect/manage-services-and-databases#grant-postgresql-roles)
+2. Give the backend runtime permission to connect to the Cloud SQL instance and a PostgreSQL role for the StockPact database. Use a private connection or Cloud SQL Auth Proxy and supply the resulting PostgreSQL connection as `DATABASE_URL`. Use a role with schema creation rights for the initial migrations. The app checks for and applies pending migrations on startup. [Cloud SQL Auth Proxy](https://cloud.google.com/sql/docs/postgres/sql-proxy)
+3. Before transferring real records, back up the existing PostgreSQL database and test the restore in a separate database. Start StockPact against that restore and verify company memberships, orders, chat, photos, and payment history. Existing private attachment files also need to remain available to their original records. Switch the pilot backend after the restore and smoke test succeed.
+4. Run the production build with `STOCKPACT_DEMO=false`, `STOCKPACT_ESCROW_MODE=disabled`, `STOCKPACT_XRPL_ENABLED=false`, and `BETTER_AUTH_URL` set to the new HTTPS origin. Supply the session secret, storage credentials and account email webhook as runtime secrets. Schedule authenticated `POST /api/jobs` calls with `STOCKPACT_JOBS_SECRET`. Firebase App Hosting requires Blaze. A managed HTTPS Node host with a Cloud SQL connection can also serve the backend. [Firebase App Hosting setup](https://firebase.google.com/docs/app-hosting/get-started)
+5. Build and install the APK for the new origin. On two Android phones, verify sign-in, product photos, chat and camera access, and confirm a single handover updates both screens. Use the separate [XRPL Testnet demo](ripple-demo.md) for settlement rehearsal.
+
+## Business onboarding
+
+Register one buyer and one supplier with distinct accounts. Configure account email delivery for `email_verification` and `password_reset`, then verify that an invited member can join only after proving ownership of their email. Use a designated reviewer or configure Persona and check a real onboarding run with authorized business representatives. Confirm that the supplier appears in search only after verification and that the buyer can request a quote and receive a reply. Review the order and payment records before enabling any real settlement.

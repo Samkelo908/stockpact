@@ -4,7 +4,7 @@ export type View = "home" | "assistant" | "marketplace" | "requests" | "orders" 
 export const views: View[] = ["home", "assistant", "marketplace", "requests", "orders", "inventory", "deliveries", "funds", "reviews", "settings", "admin"];
 export type Navigate = (view: View, selected?: string) => void;
 export type Result<T = unknown> = { state: MarketplaceState; data?: T };
-export type RunAction = <T = unknown>(action: string, values?: Record<string, unknown>, success?: string) => Promise<Result<T> | null>;
+export type RunAction = <T = unknown>(action: string, values?: Record<string, unknown> | FormData, success?: string) => Promise<Result<T> | null>;
 
 export function companyOf(state: MarketplaceState, id: string | undefined): Company | undefined {
   return state.companies.find((company) => company.id === id);

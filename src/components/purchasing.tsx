@@ -2,12 +2,13 @@
 
 import { useState, type FormEvent, type ReactNode } from "react";
 import Image from "next/image";
-import { ArrowRight, ArrowUpRight, AudioLines, Banknote, Check, ClipboardList, FileCheck2, FileText, LoaderCircle, MapPin, PackageCheck, ScanLine, Search, ShieldCheck, Store, Truck } from "lucide-react";
+import { ArrowRight, ArrowUpRight, AudioLines, Banknote, Check, ClipboardList, FileCheck2, FileText, ListPlus, LoaderCircle, MapPin, PackageCheck, ScanLine, Search, ShieldCheck, Store, Truck } from "lucide-react";
 import type { MarketplaceState, PurchaseRequest, RequestDraft } from "../shared/marketplace";
 import { cents, companyOf, type Navigate, type RunAction } from "./client";
 import { Empty, PanelTitle, Tag, TextButton, ViewTitle, dateLabel, number } from "./ui";
 import { Voice } from "./voice";
 import { orderStateLabel } from "./xrpl-autopay";
+import { MultiPurchaseForm } from "./multi-purchase";
 
 export function freshDraft(location = "Cape Town"): RequestDraft {
   return { product: "", quantity: 1, unit: "units", location, requiredDate: "", budgetCents: null, notes: "", category: "", substitutions: false, collection: false, shareBudget: false, mode: "manual" };
@@ -151,12 +152,13 @@ function RequestForm({ draft, setDraft, onSubmit, disabled, searching }: { draft
 
 export function Assistant({ state, prompt, setPrompt, draft, setDraft, busy, generate, navigate, run }: ComposerProps & { run: RunAction }) {
   const [lastPrompt, setLastPrompt] = useState("");
+  const [multiProduct, setMultiProduct] = useState(false);
   const company = companyOf(state, state.actor?.companyId);
   const building = busy === "draftRequest";
   const searching = busy === "createRequest";
   const feedback = building
     ? { title: "Preparing your request", detail: "Reading the details you entered." }
-    : searching
+    : searching || busy === "createMultiRequest"
       ? { title: "Finding matching suppliers", detail: "Saving your request before checking the catalogue." }
       : draft && draft.mode !== "manual"
         ? { title: "Request ready to review", detail: "Check the details before you search for suppliers.", complete: true }
@@ -164,6 +166,7 @@ export function Assistant({ state, prompt, setPrompt, draft, setDraft, busy, gen
 
   function onPrompt(event: FormEvent) {
     event.preventDefault();
+    setMultiProduct(false);
     setLastPrompt(prompt.trim());
     void generate();
   }
@@ -190,11 +193,15 @@ export function Assistant({ state, prompt, setPrompt, draft, setDraft, busy, gen
           <label className="field">Describe the goods you need<textarea className="composer-text" value={prompt} onChange={(event) => setPrompt(event.currentTarget.value)} maxLength={2000} placeholder="I need 20 cases of 500 ml still water delivered to Cape Town." required /></label>
           <div className="button-row"><Voice onTranscript={setPrompt} disabled={!!busy} preferCloudflare={state.aiMode === "cloudflare"} /><button className="primary" type="submit" disabled={!!busy}>{building ? <>Preparing request…<LoaderCircle className="spin" size={16} /></> : <>Build request<ArrowRight size={16} /></>}</button></div>
         </form>
-        <button className="secondary" type="button" onClick={() => setDraft(freshDraft(company?.location))} disabled={!!busy}><ClipboardList size={16} />Use guided form</button>
+        <div className="button-row">
+          <button className="secondary" type="button" onClick={() => { setMultiProduct(false); setDraft(freshDraft(company?.location)); }} disabled={!!busy}><ClipboardList size={16} />Use guided form</button>
+          <button className="secondary" type="button" aria-pressed={multiProduct} onClick={() => setMultiProduct(true)} disabled={!!busy}><ListPlus size={16} />Source multiple products</button>
+        </div>
       </section>
       <section className="card panel">
-        <PanelTitle title="Review your request" subtitle="Check quantities, dates and delivery details before finding suppliers." />
-        {draft ? <RequestForm draft={draft} setDraft={setDraft} onSubmit={match} disabled={!!busy} searching={searching} /> : <Empty title="No request to review yet" detail="Describe what you need or open the guided form." icon={AudioLines} />}
+        <PanelTitle title={multiProduct ? "Grouped purchase" : "Review your request"} subtitle={multiProduct ? undefined : "Check quantities, dates and delivery details before finding suppliers."} />
+        {multiProduct ? <MultiPurchaseForm initial={draft} location={company?.location} busy={busy} run={run} navigate={navigate} onSaved={() => { setMultiProduct(false); setDraft(null); }} />
+          : draft ? <RequestForm draft={draft} setDraft={setDraft} onSubmit={match} disabled={!!busy} searching={searching} /> : <Empty title="No request to review yet" detail="Describe what you need or open the guided form." icon={AudioLines} />}
       </section>
     </div>
   </>;
