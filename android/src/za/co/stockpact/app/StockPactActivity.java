@@ -112,8 +112,9 @@ public final class StockPactActivity extends Activity {
                 saveExport(uri.getQueryParameter("name"), uri.getQueryParameter("type"));
                 return true;
             }
-            if (trustedHttps(uri) && "login.trycloudflare.com".equalsIgnoreCase(uri.getHost())
-                && workspace.getHost().endsWith(".trycloudflare.com")) return false;
+            if (trustedHttps(uri) && workspace.getHost().endsWith(".trycloudflare.com")
+                && ("login.trycloudflare.com".equalsIgnoreCase(uri.getHost())
+                    || "cf-cloudflare-quicktunnels.cloudflareaccess.com".equalsIgnoreCase(uri.getHost()))) return false;
             if (trustedHttps(uri)) {
                 try { startActivity(new Intent(Intent.ACTION_VIEW, uri)); }
                 catch (android.content.ActivityNotFoundException ignored) { tell("No app can open this link."); }
