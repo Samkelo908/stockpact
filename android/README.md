@@ -14,7 +14,7 @@ The build creates and verifies `artifacts/StockPact.apk`. Keep the signing key i
 
 ## Run the two-phone demo
 
-1. Install the same APK on both Android phones and open **StockPact** from the app launcher. For an email-protected demo, sign in to the workspace with the allowed email on each phone.
+1. Install the same APK on both Android phones and open **StockPact** from the app launcher. On the current demo build, enter the workspace access code on each phone.
 2. On phone 1, stay in **Buyer · Harbour Table**. Open **More → Requests & quotes → Chopped tomatoes**, accept the **Cape Supply Co.** quote, and reserve demo funds.
 3. On phone 2, open the account menu, switch to **Supplier · Cape Supply Co.**, then open the new order and tap **Dispatch goods**.
 4. On phone 1, open the order, tap **Inspect goods & generate QR**, confirm the received quantity, and display the QR.
@@ -25,3 +25,5 @@ This walkthrough uses fictional businesses and simulated funds. The protected de
 For the Ripple track, follow the [XRPL Testnet walkthrough](../docs/ripple-demo.md) instead. That mode submits valueless test XRP to the native XRP Ledger and shows the validated receipt in the app.
 
 XRPL Testnet autopay runs on the workspace server and needs no wallet app on either phone. The order shows delivery and payment separately. The buyer owner can request another decision for a blocked handover before a transaction has been signed. The EVM escrow flow requires a browser with a connected EVM wallet.
+
+For the private two-phone demo, run `node android/demo-gateway.mjs` with `STOCKPACT_PHONE_ORIGIN` set to the HTTPS app origin, a random 24-character or longer URL-safe `STOCKPACT_PHONE_ACCESS_CODE`, and a random 32-byte hex `STOCKPACT_PHONE_SESSION_KEY`. Set the app’s `BETTER_AUTH_URL` to the same origin. Point the HTTPS tunnel to the gateway on loopback port 3116. The demo server runs on loopback port 3112. Supply the code privately to each tester. If the temporary HTTPS hostname changes, update both origins and rebuild the APK.

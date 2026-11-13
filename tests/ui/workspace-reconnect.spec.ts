@@ -34,6 +34,7 @@ test('reconnects from Home and retries supplier search without duplicating the s
   await page.getByRole('button', { name: 'Find suppliers' }).click();
   const reconnect = page.getByRole('button', { name: 'Reconnect', exact: true });
   await expect(reconnect).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Sign in again', exact: true })).toBeVisible();
   await expect(page.getByText(/Unexpected token/)).toHaveCount(0);
   await page.getByRole('navigation', { name: 'Mobile navigation' }).getByRole('button', { name: 'Home', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Procurement overview' })).toBeVisible();
@@ -53,11 +54,13 @@ test('reconnects from Home and retries supplier search without duplicating the s
 test('removes a stale reconnect warning when the workspace starts responding again', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'phone', 'This check uses the mobile viewport.');
   let expired = false;
+  let attempted = false;
   await page.route('**/api/state', (route) => expired
     ? route.fulfill({ status: 401, contentType: 'text/plain', body: 'Unauthorized' })
     : route.continue());
   await page.route('**/api/actions', async (route) => {
-    if (route.request().postDataJSON().action !== 'draftRequest') return route.continue();
+    if (route.request().postDataJSON().action !== 'draftRequest' || attempted) return route.continue();
+    attempted = true;
     expired = true;
     await route.fulfill({ status: 401, contentType: 'text/plain', body: 'Unauthorized' });
   });
@@ -70,5 +73,22 @@ test('removes a stale reconnect warning when the workspace starts responding aga
   expired = false;
   await expect(page.getByText('Connection restored. You can try your last action again.')).toBeVisible();
   await expect(reconnect).toHaveCount(0);
-  await expect(page.getByLabel('Describe the goods you need')).toHaveValue(prompt);
+  await expect(page.getByLabel('Describe your requirement')).toHaveValue(prompt);
+  await page.getByRole('button', { name: 'Build request' }).click();
+  await expect(page.getByLabel('Product and specification')).toHaveValue('water');
+});
+
+test('keeps the current purchase draft when building a replacement fails', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'phone', 'This check uses the mobile viewport.');
+  await page.goto('/#assistant');
+  await page.getByRole('button', { name: 'Use guided form' }).click();
+  await page.getByLabel('Product and specification').fill('Chopped tomatoes');
+  await page.getByLabel('Describe the goods you need').fill('Water');
+  await page.route('**/api/actions', (route) => route.fulfill({
+    status: 502, json: { error: 'The drafting service could not respond. Try again.' },
+  }));
+  await page.getByRole('button', { name: 'Build request' }).click();
+  await expect(page.getByRole('alert').filter({ hasText: 'The drafting service could not respond.' })).toBeVisible();
+  await expect(page.getByLabel('Product and specification')).toHaveValue('Chopped tomatoes');
+  await expect(page.getByLabel('Describe the goods you need')).toHaveValue('Water');
 });

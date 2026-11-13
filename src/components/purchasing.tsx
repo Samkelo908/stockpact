@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type FormEvent, type ReactNode } from "react";
-import { ArrowRight, ArrowUpRight, AudioLines, Banknote, Check, ClipboardList, FileCheck2, FileText, ListPlus, LoaderCircle, MapPin, PackageCheck, ScanLine, Search, ShieldCheck, Store, Truck } from "lucide-react";
+import { ArrowRight, ArrowUpRight, AudioLines, Banknote, Check, CircleAlert, ClipboardList, FileCheck2, FileText, ListPlus, LoaderCircle, MapPin, PackageCheck, ScanLine, Search, ShieldCheck, Store, Truck } from "lucide-react";
 import type { MarketplaceState, PurchaseRequest, RequestDraft } from "../shared/marketplace";
 import { cents, companyOf, type Navigate, type RunAction } from "./client";
 import { Empty, PanelTitle, Tag, TextButton, ViewTitle, dateLabel, number } from "./ui";
@@ -23,9 +23,19 @@ type ComposerProps = {
   busy: string;
   generate: () => Promise<void>;
   navigate: Navigate;
+  sourcingError: { action: "draftRequest" | "createRequest"; message: string; reconnect: boolean } | null;
+  reconnect: () => void;
+  onVoiceReconnect: () => void;
 };
 
-export function Dashboard({ state, prompt, setPrompt, busy, generate, setDraft, navigate }: ComposerProps) {
+function SourcingFeedback({ feedback, reconnect }: { feedback: NonNullable<ComposerProps["sourcingError"]>; reconnect: () => void }) {
+  return <div className={`notice sourcing-feedback ${feedback.reconnect ? "notice-warn" : "notice-error"}`} role="alert">
+    <CircleAlert size={16} aria-hidden="true" /><span>{feedback.message}</span>
+    {feedback.reconnect && <button className="secondary" type="button" onClick={reconnect}>Sign in again</button>}
+  </div>;
+}
+
+export function Dashboard({ state, prompt, setPrompt, busy, generate, setDraft, navigate, sourcingError, reconnect, onVoiceReconnect }: ComposerProps) {
   const company = companyOf(state, state.actor?.companyId);
   const role = state.actor?.role;
   const canBuy = company?.capabilities.includes("buyer") && (role === "owner" || role === "purchaser");
@@ -66,9 +76,10 @@ export function Dashboard({ state, prompt, setPrompt, busy, generate, setDraft, 
         <form className="sourcing-form" onSubmit={(event) => { event.preventDefault(); void generate(); }}>
           <label className="sr-only" htmlFor="home-request">Describe your requirement</label>
           <input id="home-request" value={prompt} onChange={(event) => setPrompt(event.currentTarget.value)} placeholder="e.g. 20 cases of water" maxLength={2000} required />
-          <Voice onTranscript={setPrompt} disabled={!!busy} preferCloudflare={state.aiMode === "cloudflare"} />
-          <button className="primary" type="submit" disabled={!!busy} aria-label="Build request"><span>Build request</span><ArrowRight size={16} /></button>
+          <Voice onTranscript={setPrompt} onReconnect={onVoiceReconnect} disabled={!!busy} preferCloudflare={state.aiMode === "cloudflare"} />
+          <button className="primary" type="submit" disabled={!!busy}>{busy === "draftRequest" ? <>Preparing request…<LoaderCircle className="spin" size={16} /></> : <>Build request<ArrowRight size={16} /></>}</button>
         </form>
+        {sourcingError?.action === "draftRequest" && <SourcingFeedback feedback={sourcingError} reconnect={reconnect} />}
         <div className="sourcing-helpers">
           <button type="button" onClick={() => { setDraft(freshDraft(company?.location)); navigate("assistant"); }}><ClipboardList size={15} />Use the order form</button>
           <button type="button" onClick={() => { setPrompt("I need 20 cases of 500 ml still water delivered to Cape Town."); document.getElementById("home-request")?.focus(); }}>Try an example</button>
@@ -117,7 +128,7 @@ export function SearchProgress({ title, detail, complete = false, action }: { ti
   </div>;
 }
 
-function RequestForm({ draft, setDraft, onSubmit, disabled, searching }: { draft: RequestDraft; setDraft: (draft: RequestDraft) => void; onSubmit: () => Promise<void>; disabled: boolean; searching: boolean }) {
+function RequestForm({ draft, setDraft, onSubmit, disabled, searching, feedback }: { draft: RequestDraft; setDraft: (draft: RequestDraft) => void; onSubmit: () => Promise<void>; disabled: boolean; searching: boolean; feedback?: ReactNode }) {
   const update = <K extends keyof RequestDraft>(key: K, value: RequestDraft[K]) => setDraft({ ...draft, [key]: value });
   const missing = [
     !draft.product.trim() && "product",
@@ -147,10 +158,11 @@ function RequestForm({ draft, setDraft, onSubmit, disabled, searching }: { draft
     <div className="button-row"><button type="submit" className="primary" disabled={disabled} aria-describedby={missing.length ? "request-search-details" : undefined}>
       {searching ? <><LoaderCircle className="spin" size={16} />Finding suppliers…</> : <><Search size={16} />Find suppliers</>}
     </button></div>
+    {feedback}
   </form>;
 }
 
-export function Assistant({ state, prompt, setPrompt, draft, setDraft, busy, generate, navigate, run }: ComposerProps & { run: RunAction }) {
+export function Assistant({ state, prompt, setPrompt, draft, setDraft, busy, generate, navigate, run, sourcingError, reconnect, onVoiceReconnect }: ComposerProps & { run: RunAction }) {
   const [lastPrompt, setLastPrompt] = useState("");
   const [multiProduct, setMultiProduct] = useState(false);
   const company = companyOf(state, state.actor?.companyId);
@@ -189,7 +201,8 @@ export function Assistant({ state, prompt, setPrompt, draft, setDraft, busy, gen
         {(lastPrompt || draft?.mode === "cloudflare" || draft?.mode === "demo") && <div className="chat-bubble"><strong>Your requirement</strong><p>{lastPrompt || prompt}</p></div>}
         <form className="small-stack" onSubmit={onPrompt}>
           <label className="field">Describe the goods you need<textarea className="composer-text" value={prompt} onChange={(event) => setPrompt(event.currentTarget.value)} maxLength={2000} placeholder="I need 20 cases of 500 ml still water delivered to Cape Town." required /></label>
-          <div className="button-row"><Voice onTranscript={setPrompt} disabled={!!busy} preferCloudflare={state.aiMode === "cloudflare"} /><button className="primary" type="submit" disabled={!!busy}>{building ? <>Preparing request…<LoaderCircle className="spin" size={16} /></> : <>Build request<ArrowRight size={16} /></>}</button></div>
+          <div className="button-row"><Voice onTranscript={setPrompt} onReconnect={onVoiceReconnect} disabled={!!busy} preferCloudflare={state.aiMode === "cloudflare"} /><button className="primary" type="submit" disabled={!!busy}>{building ? <>Preparing request…<LoaderCircle className="spin" size={16} /></> : <>Build request<ArrowRight size={16} /></>}</button></div>
+          {sourcingError?.action === "draftRequest" && <SourcingFeedback feedback={sourcingError} reconnect={reconnect} />}
         </form>
         <div className="button-row">
           <button className="secondary" type="button" onClick={() => { setMultiProduct(false); setDraft(freshDraft(company?.location)); }} disabled={!!busy}><ClipboardList size={16} />Use guided form</button>
@@ -199,7 +212,8 @@ export function Assistant({ state, prompt, setPrompt, draft, setDraft, busy, gen
       <section className="card panel">
         <PanelTitle title={multiProduct ? "Grouped purchase" : "Review your request"} subtitle={multiProduct ? undefined : "Check quantities, dates and delivery details before finding suppliers."} />
         {multiProduct ? <MultiPurchaseForm initial={draft} location={company?.location} busy={busy} run={run} navigate={navigate} onSaved={() => { setMultiProduct(false); setDraft(null); }} />
-          : draft ? <RequestForm draft={draft} setDraft={setDraft} onSubmit={match} disabled={!!busy} searching={searching} /> : <Empty title="No request to review yet" detail="Describe what you need or open the guided form." icon={AudioLines} />}
+          : draft ? <RequestForm draft={draft} setDraft={setDraft} onSubmit={match} disabled={!!busy} searching={searching}
+              feedback={sourcingError?.action === "createRequest" && <SourcingFeedback feedback={sourcingError} reconnect={reconnect} />} /> : <Empty title="No request to review yet" detail="Describe what you need or open the guided form." icon={AudioLines} />}
       </section>
     </div>
   </>;

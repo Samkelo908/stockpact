@@ -30,6 +30,7 @@ type Route = { view: View; selected: string };
 const start: Route = { view: "home", selected: "" };
 const recoveryKey = 'stockpact:request-recovery:v1';
 type RequestRecovery = { actorId: string; companyId: string; savedAt: number; prompt: string; draft: RequestDraft | null; requestId?: string };
+type SourcingError = { action: 'draftRequest' | 'createRequest'; message: string; reconnect: boolean };
 
 function readRoute(): Route {
   const [section, ...details] = window.location.hash.slice(1).split("/");
@@ -54,6 +55,7 @@ export function StockPact() {
   const [marketQuery, setMarketQuery] = useState("");
   const [prompt, setPrompt] = useState("");
   const [draft, setDraft] = useState<RequestDraft | null>(null);
+  const [sourcingError, setSourcingError] = useState<SourcingError | null>(null);
   const actionActive = useRef(false);
   const revision = useRef(0);
   const activePoll = useRef(false);
@@ -89,6 +91,12 @@ export function StockPact() {
         setState(body);
         setLoadError('');
         setConnection((current) => current === 'action' ? 'restored' : current === 'refresh' ? 'connected' : current);
+        setSourcingError((current) => current?.reconnect ? { ...current, reconnect: false, message: 'Connection restored. Try again to continue.' } : current);
+        if (new URLSearchParams(window.location.search).has('stockpact-reconnect')) {
+          const url = new URL(window.location.href);
+          url.searchParams.delete('stockpact-reconnect');
+          window.history.replaceState(window.history.state, '', url);
+        }
       }
     } catch (caught) {
       if (!signal?.aborted && version === revision.current) {
@@ -141,6 +149,7 @@ export function StockPact() {
     revision.current += 1;
     setBusy(action);
     setNotice(null);
+    setSourcingError(null);
     try {
       if (action === 'createRequest' && values && !(values instanceof FormData) && values.findSuppliers === true) {
         const submission = JSON.stringify(values.draft);
@@ -165,8 +174,14 @@ export function StockPact() {
       if (success) setNotice({ text: success, error: false });
       return result;
     } catch (caught) {
-      if (caught instanceof WorkspaceReconnectError) setConnection('action');
-      else setNotice({ text: caught instanceof Error ? caught.message : "Connection interrupted. Try again.", error: true });
+      const reconnect = caught instanceof WorkspaceReconnectError;
+      const message = caught instanceof Error ? caught.message : "Connection interrupted. Try again.";
+      if (reconnect) setConnection('action');
+      if (action === 'draftRequest' || action === 'createRequest') {
+        setSourcingError({ action, message: reconnect ? 'Sign in again to continue. Your details are saved for this reconnect.' : message, reconnect });
+      } else if (!reconnect) {
+        setNotice({ text: message, error: true });
+      }
       return null;
     } finally {
       actionActive.current = false;
@@ -182,15 +197,18 @@ export function StockPact() {
         requestId: submission && submission.draft === JSON.stringify(draft) ? submission.id : undefined };
       try { window.sessionStorage.setItem(recoveryKey, JSON.stringify(saved)); } catch { /* Storage can be disabled. */ }
     }
-    window.location.reload();
+    const url = new URL(window.location.href);
+    url.searchParams.set('stockpact-reconnect', crypto.randomUUID());
+    window.location.replace(url);
   }
 
   async function generate() {
     if (!prompt.trim() || busy) return;
-    navigate("assistant");
-    setDraft(null);
     const result = await run<RequestDraft>("draftRequest", { prompt: prompt.trim() });
-    if (result?.data) setDraft(result.data);
+    if (result?.data) {
+      setDraft(result.data);
+      if (route.view !== 'assistant') navigate("assistant");
+    }
   }
 
   const startDraft = (value: RequestDraft) => { requestSubmission.current = null; setPrompt(""); setDraft(value); navigate("assistant"); };
@@ -221,7 +239,8 @@ export function StockPact() {
   });
   const current = links.find((item) => item.id === route.view);
   const navTitle = current?.title ?? "Overview";
-  const composer = { state, prompt, setPrompt, draft, setDraft, busy, generate, navigate };
+  const composer = { state, prompt, setPrompt, draft, setDraft, busy, generate, navigate, sourcingError, reconnect,
+    onVoiceReconnect: () => setConnection('action') };
   const common = { state, busy, run, navigate, selected: route.selected };
   const unread = state.notifications.filter((notification) => !notification.read).length;
 
