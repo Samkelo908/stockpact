@@ -1,4 +1,9 @@
 .payments-page { display: grid; gap: 20px; }
+.xrpl-panel { border-top: 3px solid var(--gold); }
+.xrpl-checkout { background: #fff9e6; border-color: #ead8a6; }
+.xrpl-address { overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.xrpl-attempt h3 { font-variant-numeric: tabular-nums; }
+.xrpl-attempt a.secondary { text-decoration: none; }
 .payment-overview { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(245px, 1fr); gap: 14px; }
 .payment-balance {
   position: relative;

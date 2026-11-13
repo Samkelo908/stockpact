@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { after } from 'next/server';
+import { decideXrplHandover } from '@/integrations/purchasing';
 import { MarketplaceError } from '@/server/access';
 import { marketplaceAction } from '@/server/actions';
 import { actionLimit } from '@/server/db';
@@ -7,6 +8,7 @@ import { apiError, json, readRequestBody, requireSameOrigin } from '@/server/htt
 import { runMatchingJobs } from '@/server/procurement';
 import { getActor } from '@/server/session';
 import { marketplaceState } from '@/server/state';
+import { runXrplJobs } from '@/server/xrpl';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -34,6 +36,12 @@ export async function POST(request: Request) {
     const result = await marketplaceAction(action, input);
     const actor = 'actor' in result ? result.actor ?? null : await getActor();
     if (action === 'matchRequest' && actor) after(async () => { await runMatchingJobs(actor.companyId); });
+    if (actor && (action === 'redeemDelivery' || action === 'retryXrplPayment') && result.data &&
+        typeof result.data === 'object' && 'xrplAttemptId' in result.data && typeof result.data.xrplAttemptId === 'string') {
+      const attemptId = result.data.xrplAttemptId;
+      const companyId = action === 'retryXrplPayment' ? actor.companyId : undefined;
+      after(async () => { await runXrplJobs(decideXrplHandover, { attemptId, companyId }); });
+    }
     const state = await marketplaceState(actor);
     if (result.data && typeof result.data === 'object' && 'paymentError' in result.data && 'paymentStatus' in result.data) {
       return json({ error: result.data.paymentError, state }, Number(result.data.paymentStatus));

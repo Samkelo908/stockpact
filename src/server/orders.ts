@@ -11,6 +11,7 @@ import { actorCompany, actorOrder, audit, buyerAccess, MarketplaceError, notify,
 import { record, records, save, tables, update, type DbSession } from './db';
 import { id, parse, quantity, rating } from './inputs';
 import { dateIn, now } from './seed';
+import { ensureXrplOrderMandate, stageXrplIntent } from './xrpl';
 
 type StoredOrder = Order & { fundingTerms?: FundingTerms };
 type StoredQR = DeliveryAuthorization & { id: string; supplierId: string; nonce: `0x${string}`; previousQuantity: number;
@@ -92,6 +93,23 @@ export async function fundOrder(db: DbSession, actor: Actor, input: unknown) {
   await recordTransaction(db, order, { id: txId, kind: 'funding', mode, status: 'confirmed', amountCents: order.totalCents, hash: transactionHash });
   await notify(db, order.supplierId, 'Order funded', `${order.reference} is ready to fulfil.`, '#orders');
   await audit(db, actor, 'fund_order', order.id);
+  return order;
+}
+
+export async function enableXrplOrder(db: DbSession, actor: Actor, orderId: string) {
+  const order = await actorOrder(db, actor, orderId) as StoredOrder;
+  buyerAccess(actor, order, 'owner');
+  if (order.paymentMode === 'xrpl' && order.status === 'funded') return order;
+  if (order.status !== 'awaiting_funding' || order.fundingTerms || order.transactions.length > 0 || order.fundedCents) {
+    throw new MarketplaceError('Only approved, unfunded orders can use XRP Ledger Testnet autopay.', 409);
+  }
+  order.xrplMandateId = await ensureXrplOrderMandate(db, actor, order);
+  order.paymentMode = 'xrpl';
+  order.status = 'funded';
+  orderChanged(order, 'XRPL Testnet autopay enabled · ready for dispatch');
+  await update(db, tables.orders, order.id, order);
+  await notify(db, order.supplierId, 'Order ready for fulfilment', `${order.reference} uses valueless test XRP after handover.`, '#orders');
+  await audit(db, actor, 'enable_xrpl_order', order.id, { mandateId: order.xrplMandateId });
   return order;
 }
 
@@ -243,12 +261,28 @@ export async function redeemDelivery(db: DbSession, actor: Actor, input: unknown
     ...transactionFields, simulateInterruption: z.boolean().default(false) }), input);
   const { qr, order } = await loadQR(db, actor, token);
   supplierAccess(actor, order, true);
+  if (order.paymentMode === 'xrpl' && qr.status === 'redeemed') throw new MarketplaceError('This handover is already confirmed. Open the order to see its test payment status.', 409);
   if (order.paymentMode === 'testnet' && qr.status === 'redeemed' && transactionHash && qr.transactionHash === transactionHash &&
       order.transactions.some((tx) => tx.hash === transactionHash && tx.status === 'confirmed')) return order;
   ensureQR(qr, order.paymentMode === 'testnet' && Boolean(qr.buyerSignature && transactionHash));
   if (!order.paymentMode || !['dispatched', 'partial'].includes(order.status) || qr.previousQuantity !== settled(order) ||
-      order.releasedCents + order.refundedCents + qr.amountCents > order.fundedCents) throw new MarketplaceError('The order balance or accepted quantity has changed.', 409);
+      qr.quantity > order.quantity - settled(order) ||
+      (order.paymentMode !== 'xrpl' && order.releasedCents + order.refundedCents + qr.amountCents > order.fundedCents)) {
+    throw new MarketplaceError('The order balance or accepted quantity has changed.', 409);
+  }
   const mode = order.paymentMode;
+  if (mode === 'xrpl') {
+    if (transactionHash || simulateInterruption) throw new MarketplaceError('XRPL Testnet autopay uses the recorded handover only.', 422);
+    order.acceptedQuantity += qr.quantity;
+    order.status = settled(order) === order.quantity ? 'completed' : 'partial';
+    orderChanged(order, `${qr.quantity} ${order.unit} accepted · queued for testnet autopay review`);
+    await update(db, tables.qr, qr.id, { ...qr, status: 'redeemed' });
+    await update(db, tables.orders, order.id, order);
+    const attempt = requireFound(await stageXrplIntent(db, order.id, qr.id), 'Could not queue the testnet payment. No handover was recorded.');
+    await notify(db, order.buyerId, 'Delivery accepted', `${order.reference} · ${qr.quantity} ${order.unit} accepted. Check the order for the test payment decision.`, '#orders');
+    await audit(db, actor, 'redeem_delivery', order.id, { xrplAttemptId: attempt.id });
+    return { ...order, xrplAttemptId: attempt.id };
+  }
   let txId = `demo-release:${qr.id}`;
   if (mode === 'testnet') {
     const terms = requireFound(order.fundingTerms);
@@ -363,6 +397,7 @@ export async function resolveDispute(db: DbSession, actor: Actor, input: unknown
   const dispute = requireFound(await record<Dispute>(db, tables.disputes, disputeId));
   const order = await actorOrder(db, actor, dispute.orderId);
   if (dispute.status !== 'open' || order.status !== 'disputed') throw new MarketplaceError('This dispute has already been resolved.', 409);
+  if (refund && order.paymentMode === 'xrpl') throw new MarketplaceError('This order has no escrow to refund. Review its test XRP receipts separately.', 422);
   if (refund && order.paymentMode !== 'demo') throw new MarketplaceError('A confirmed on-chain refund is required for testnet escrow.', 422);
   if (refund) {
     order.refundedQuantity = (order.refundedQuantity ?? 0) + dispute.quantity;

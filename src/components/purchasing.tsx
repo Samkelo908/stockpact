@@ -7,6 +7,7 @@ import type { MarketplaceState, PurchaseRequest, RequestDraft } from "../shared/
 import { cents, companyOf, type Navigate, type RunAction } from "./client";
 import { Empty, PanelTitle, Tag, TextButton, ViewTitle, dateLabel, number } from "./ui";
 import { Voice } from "./voice";
+import { orderStateLabel } from "./xrpl-autopay";
 
 export function freshDraft(location = "Cape Town"): RequestDraft {
   return { product: "", quantity: 1, unit: "units", location, requiredDate: "", budgetCents: null, notes: "", category: "", substitutions: false, collection: false, shareBudget: false, mode: "manual" };
@@ -38,7 +39,7 @@ export function Dashboard({ state, prompt, setPrompt, busy, generate, setDraft, 
     { label: "Deliveries in progress", value: deliveries.length, icon: Truck, view: "deliveries" },
   ] as const;
   const activity = [
-    ...state.orders.map((order) => ({ key: order.id, title: order.product, detail: `${order.reference} · ${dateLabel(order.createdAt)}`, status: order.status, date: order.timeline.at(-1)?.at ?? order.createdAt, view: "orders" as const, icon: PackageCheck })),
+    ...state.orders.map((order) => ({ key: order.id, title: order.product, detail: `${order.reference} · ${dateLabel(order.createdAt)}`, status: orderStateLabel(order), date: order.timeline.at(-1)?.at ?? order.createdAt, view: "orders" as const, icon: PackageCheck })),
     ...state.requests.map((request) => ({ key: request.id, title: request.draft.product, detail: `${number(request.draft.quantity)} ${request.draft.unit} · ${dateLabel(request.createdAt)}`, status: request.status, date: request.activity.at(-1)?.at ?? request.createdAt, view: "requests" as const, icon: FileText })),
   ].sort((first, second) => second.date.localeCompare(first.date)).slice(0, 4);
   const pendingApproval = state.orders.filter((order) => order.status === "approval").length;

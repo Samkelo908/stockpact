@@ -155,6 +155,40 @@ class WorkersAI implements PurchasingProvider, TranscriptionProvider {
     }, 25000);
     return z.object({ text: z.string().trim().max(4000) }).parse(result).text;
   }
+
+  async decideTestnetHandover(evidence: { acceptedQuantity: number; quoteAmountCents: number; drops: string }) {
+    const decision = z.object({
+      action: z.enum(["request_test_payment", "hold"]),
+      reason: z.enum(["confirmed_handover", "invalid_evidence"]),
+    });
+    const result = await this.run(process.env.CLOUDFLARE_AUTOPAY_MODEL || defaultDraftModel, {
+      messages: [
+        { role: "system", content: [
+          "You are StockPact's accounts payable agent on XRP Ledger Testnet.",
+          "Review a recorded, confirmed delivery handover. Your only tools are request_test_payment and hold.",
+          "Request test payment with reason confirmed_handover when the accepted quantity and quote amount are positive, and the test XRP amount is consistent with the quote at 10 drops per cent.",
+          "Otherwise hold with reason invalid_evidence. Never provide a payment destination, signing instructions or a new amount.",
+          "The separate signing service enforces the owner's mandate, including spending limits and pause state.",
+        ].join(" ") },
+        { role: "user", content: JSON.stringify({
+          handoverStatus: "confirmed", acceptedQuantity: evidence.acceptedQuantity,
+          quoteAmountCents: evidence.quoteAmountCents, testXrpDrops: evidence.drops,
+        }) },
+      ],
+      response_format: { type: "json_schema", json_schema: z.toJSONSchema(decision) },
+      temperature: 0,
+      max_tokens: 100,
+    }, 12000);
+    const payload = z.object({ response: z.unknown() }).parse(result).response;
+    const output = decision.parse(typeof payload === "string" ? JSON.parse(payload) : payload);
+    const requestPayment = output.action === "request_test_payment" && output.reason === "confirmed_handover";
+    return {
+      requestPayment,
+      reason: requestPayment
+        ? "Workers AI requested payment after reviewing the confirmed handover."
+        : "Workers AI held the payment because the handover evidence did not match.",
+    };
+  }
 }
 
 function cloudflareProvider() {
@@ -192,4 +226,10 @@ export async function parsePurchaseRequest(prompt: string): Promise<PurchaseDraf
 
 export function getTranscriptionProvider(): TranscriptionProvider | null {
   return cloudflareProvider();
+}
+
+export async function decideXrplHandover(evidence: Parameters<WorkersAI["decideTestnetHandover"]>[0]) {
+  const provider = cloudflareProvider();
+  if (!provider) throw new Error("Workers AI is not configured for testnet autopay.");
+  return provider.decideTestnetHandover(evidence);
 }

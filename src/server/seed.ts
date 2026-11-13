@@ -141,6 +141,8 @@ export async function ensureDemoSeed() {
 export async function resetDemo() {
   if (!demoEnabled() || process.env.DATABASE_URL) throw new Error('Reset is available only for the local demo database.');
   await mutate(async (db) => {
+    const autopay = await sql`select id from xrpl_mandates limit 1`.execute(db);
+    if (autopay.rows.length) throw new Error('This workspace contains XRPL autopay history. Use a fresh database for a new demo.');
     const demoOrder = sql`order_id in (select id from orders where company_id like 'demo-%')`;
     for (const table of [tables.transactions, tables.qr, tables.disputes, tables.reviews]) {
       await sql`delete from ${sql.table(table)} where ${demoOrder}`.execute(db);

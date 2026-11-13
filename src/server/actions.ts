@@ -12,6 +12,7 @@ import * as reputation from './reputation';
 import { now, resetDemo } from './seed';
 import { actorForUser, applyRegistrationCookies, clearSession, demoActor, getActor, getAuth, registerCompanyAccount, selectCompany } from './session';
 import * as settings from './settings';
+import { pauseXrplMandate, upsertXrplMandate } from './xrpl';
 
 const email = z.email().transform((value) => value.toLowerCase());
 const password = z.string().min(10).max(128);
@@ -93,6 +94,11 @@ export async function marketplaceAction(action: string, input: unknown): Promise
     await resetDemo();
     return {};
   }
+  if (action === 'retryXrplPayment') {
+    requireRole(actor, 'owner');
+    if (!actor.demoRole) throw new MarketplaceError('XRPL Testnet autopay is available in the fictional workspace.', 403);
+    return { data: { xrplAttemptId: field(input, 'attemptId') } };
+  }
   const data = await mutate(async (db) => {
     switch (action) {
       case 'createRequest': return procurement.createRequest(db, actor, input);
@@ -117,6 +123,9 @@ export async function marketplaceAction(action: string, input: unknown): Promise
       case 'approveOrder': return orders.approveOrder(db, actor, field(input, 'orderId'));
       case 'prepareFunding': return orders.prepareFunding(db, actor, field(input, 'orderId'));
       case 'fundOrder': return orders.fundOrder(db, actor, input);
+      case 'enableXrplOrder': return orders.enableXrplOrder(db, actor, field(input, 'orderId'));
+      case 'saveXrplMandate': return upsertXrplMandate(db, actor, input);
+      case 'pauseXrplMandate': return pauseXrplMandate(db, actor, input);
       case 'dispatchOrder': return orders.dispatchOrder(db, actor, field(input, 'orderId'));
       case 'assignDriver': return orders.assignDriver(db, actor, input);
       case 'authorizeDelivery': return orders.authorizeDelivery(db, actor, input);

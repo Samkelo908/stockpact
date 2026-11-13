@@ -6,6 +6,7 @@ import type { Actor, Company, DeliveryAuthorization, Dispute, Listing, Marketpla
 import { orderScope } from './access';
 import { demoEnabled, getDb, record, records, tables } from './db';
 import { demoRoleOptions } from './seed';
+import { getXrplState } from './xrpl';
 
 export type Preferences = { favorites: string[]; preferredSuppliers: string[] };
 export const defaultPreferences = (): Preferences => ({ favorites: [], preferredSuppliers: [] });
@@ -36,7 +37,7 @@ export async function marketplaceState(actor: Actor | null): Promise<Marketplace
   const requestWhere = sql`(${canBuy} and company_id = ${own}) or (${canSell} and exists (
     select 1 from supplier_invitations s where s.request_id = purchase_requests.id and s.company_id = ${own}))`;
   const companyWhere = sql`demo = ${realm} and (id = ${own} or data->'verification'->>'business' = 'verified' or ${canModerate})`;
-  const [companies, listings, requests, quotes, orders, notices, prefs, reviews, disputes, shopping, team, authorizations, responses, verification] = await Promise.all([
+  const [companies, listings, requests, quotes, orders, notices, prefs, reviews, disputes, shopping, team, authorizations, responses, verification, xrpl] = await Promise.all([
     records<Company>(db, tables.companies, companyWhere),
     records<Listing>(db, tables.listings, sql`company_id in (select id from companies where ${companyWhere})
       and (company_id = ${own} or data->>'archived' = 'false')`),
@@ -62,6 +63,7 @@ export async function marketplaceState(actor: Actor | null): Promise<Marketplace
       from verification_checks where (${actor.role === 'owner'} and company_id = ${own}) or
       (${canModerate} and company_id in (select id from companies where demo = ${realm}))
       order by created_at desc limit 150`.execute(db),
+    getXrplState(actor),
   ]);
   const protectedCompanies = companies.map((company) => company.id === own || canModerate ? company : {
     ...company, registrationNumber: undefined, contact: undefined, representative: undefined,
@@ -75,7 +77,7 @@ export async function marketplaceState(actor: Actor | null): Promise<Marketplace
       matches: request.matches.filter(({ supplierId }) => supplierId === own), supplierIds: [own],
       supplierResponses, activity: supplierResponses.flatMap(({ activity }) => activity ?? []) };
   });
-  return { ...base, ...prefs, companies: protectedCompanies, listings, requests: recent(authorizedRequests), quotes: recent(quotes),
+  return { ...base, ...prefs, xrpl, companies: protectedCompanies, listings, requests: recent(authorizedRequests), quotes: recent(quotes),
     orders: recent(orders.map((order) => {
       const qr = authorizations.find((entry) => entry.orderId === order.id);
       return { ...order, activeAuthorization: qr ? { quantity: qr.quantity, amountCents: qr.amountCents, expiresAt: qr.expiresAt } : undefined };

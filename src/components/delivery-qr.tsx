@@ -8,8 +8,9 @@ import type { DeliveryAuthorization, MarketplaceState } from "../shared/marketpl
 import { RedeemTestnetDelivery } from "../integrations/escrow/controls";
 import { type Navigate, type RunAction } from "./client";
 import { Busy, Dialog, Empty, PanelTitle, Tag, ViewTitle, dateLabel, money } from "./ui";
+import { orderStateLabel, xrplAmount } from "./xrpl-autopay";
 
-export function QrDialog({ authorization, mode, currency, tokenSymbol, onClose }: { authorization: DeliveryAuthorization; mode: "demo" | "testnet"; currency?: string; tokenSymbol?: string; onClose: () => void }) {
+export function QrDialog({ authorization, mode, currency, tokenSymbol, dropsPerCent, onClose }: { authorization: DeliveryAuthorization; mode: "demo" | "testnet" | "xrpl"; currency?: string; tokenSymbol?: string; dropsPerCent?: number; onClose: () => void }) {
   const [image, setImage] = useState("");
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
@@ -18,7 +19,7 @@ export function QrDialog({ authorization, mode, currency, tokenSymbol, onClose }
   const secondsLeft = Math.max(0, Math.ceil((Date.parse(authorization.expiresAt) - clock) / 1000));
   const expired = secondsLeft === 0;
   const countdown = `${Math.floor(secondsLeft / 60)}:${String(secondsLeft % 60).padStart(2, "0")}`;
-  const amount = mode === "demo" ? money(authorization.amountCents, currency) : `${(authorization.amountCents / 100).toFixed(2)} ${tokenSymbol ?? "test tokens"}`;
+  const amount = mode === "xrpl" ? xrplAmount(authorization.amountCents, dropsPerCent) : mode === "demo" ? money(authorization.amountCents, currency) : `${(authorization.amountCents / 100).toFixed(2)} ${tokenSymbol ?? "test tokens"}`;
 
   useEffect(() => {
     if (expired) return;
@@ -40,7 +41,7 @@ export function QrDialog({ authorization, mode, currency, tokenSymbol, onClose }
   return <Dialog title="Delivery handover QR" onClose={onClose}>
     <div className="payment-qr">
       <div className="payment-qr-ticket">
-        <span className="payment-mode">{mode === "demo" ? "Demo release" : "Testnet release"}</span>
+        <span className="payment-mode">{mode === "xrpl" ? "XRPL Testnet autopay" : mode === "demo" ? "Demo release" : "Testnet release"}</span>
         <strong>{amount}</strong>
         <p>{authorization.quantity} accepted</p>
         {expired ? <p role="status">This handover QR has expired.</p> : <>
@@ -49,7 +50,7 @@ export function QrDialog({ authorization, mode, currency, tokenSymbol, onClose }
         </>}
       </div>
       {!expired && <>
-        <p className="small-note">{mode === "testnet" ? "The supplier reviews and accepts with its linked wallet." : "The signed-in supplier or assigned driver reviews and accepts the release."}</p>
+        <p className="small-note">{mode === "xrpl" ? "The supplier or assigned driver confirms delivery. StockPact checks the buyer’s mandate before sending test XRP." : mode === "testnet" ? "The supplier reviews and accepts with its linked wallet." : "The signed-in supplier or assigned driver reviews and accepts the release."}</p>
         <label className="field qr-link">Handover link<input value={url} readOnly onFocus={(event) => event.currentTarget.select()} /></label>
         <button type="button" className="secondary" onClick={() => void copy()}><Copy size={16} />{copied ? "Link copied" : "Copy handover link"}</button>
         {error && <p role="status" className="notice notice-warn">{error}</p>}
@@ -144,7 +145,7 @@ function Redeem({ initial, state, busy, run, navigate }: { initial: string; stat
 
   async function redeem() {
     if (!authorization) return;
-    const result = await run("redeemDelivery", { token: authorization.token, simulateInterruption }, "Handover accepted. Demo payment recorded.");
+    const result = await run("redeemDelivery", { token: authorization.token, simulateInterruption: !xrpl && simulateInterruption }, xrpl ? "Handover accepted. Check the order for the Testnet payment decision." : "Handover accepted. Demo payment recorded.");
     setSimulateInterruption(false);
     if (!result) return;
     setInput("");
@@ -153,6 +154,7 @@ function Redeem({ initial, state, busy, run, navigate }: { initial: string; stat
   }
 
   const order = state.orders.find((item) => item.id === authorization?.orderId);
+  const xrpl = order?.paymentMode === "xrpl";
   const testnet = (order?.paymentMode ?? state.escrow.mode) === "testnet";
 
   return <section className="card panel stack payment-scan-panel">
@@ -162,10 +164,11 @@ function Redeem({ initial, state, busy, run, navigate }: { initial: string; stat
     {busy === "inspectDelivery" && <Busy label="Checking handover authorisation" />}
     {error && <p role="alert" className="notice notice-error">{error}</p>}
     {authorization && <article className="subcard stack"><div className="split-line"><h3>Handover authorisation</h3><Tag value={authorization.status} /></div>
-      <div className="payment-checkout-total"><div><span>{testnet ? "Testnet release" : "Demo release"}</span><strong>{testnet ? `${(authorization.amountCents / 100).toFixed(2)} ${state.escrow.mode === "testnet" ? state.escrow.tokenSymbol : "test tokens"}` : money(authorization.amountCents, order?.currency)}</strong></div><LockKeyhole size={24} /></div>
+      <div className="payment-checkout-total"><div><span>{xrpl ? "XRPL Testnet autopay" : testnet ? "Testnet release" : "Demo release"}</span><strong>{xrpl ? xrplAmount(authorization.amountCents, state.xrpl?.dropsPerZarCent) : testnet ? `${(authorization.amountCents / 100).toFixed(2)} ${state.escrow.mode === "testnet" ? state.escrow.tokenSymbol : "test tokens"}` : money(authorization.amountCents, order?.currency)}</strong></div><LockKeyhole size={24} /></div>
       <dl className="payment-breakdown"><div><dt>Accepted quantity</dt><dd>{authorization.quantity}{order?.unit ? ` ${order.unit}` : ""}</dd></div>{order && <div><dt>Order</dt><dd>{order.reference}</dd></div>}</dl>
       {testnet && <RedeemTestnetDelivery state={state} inspection={authorization} token={authorization.token} run={run} busy={busy} onRedeemed={() => navigate("orders", authorization.orderId)} />}
-      {authorization.status === "active" && !testnet && <><label className="check"><input type="checkbox" checked={simulateInterruption} onChange={(event) => setSimulateInterruption(event.currentTarget.checked)} />Simulate a payment interruption</label><button className="primary" type="button" disabled={!!busy} onClick={() => void redeem()}><ShieldCheck size={16} />Accept handover and record demo payment</button></>}
+      {authorization.status === "active" && xrpl && <><p className="notice"><ShieldCheck size={16} />Confirm that the goods were handed over. StockPact checks the approved mandate before any test XRP is sent. No rand moves.</p><button className="primary" type="button" disabled={!!busy} onClick={() => void redeem()}><ShieldCheck size={16} />Accept handover and check autopay</button></>}
+      {authorization.status === "active" && !testnet && !xrpl && <><label className="check"><input type="checkbox" checked={simulateInterruption} onChange={(event) => setSimulateInterruption(event.currentTarget.checked)} />Simulate a payment interruption</label><button className="primary" type="button" disabled={!!busy} onClick={() => void redeem()}><ShieldCheck size={16} />Accept handover and record demo payment</button></>}
     </article>}
   </section>;
 }
@@ -176,6 +179,6 @@ export function Deliveries({ state, selected, busy, run, navigate }: { state: Ma
   const deliveryOrders = state.orders.filter((order) => ["funded", "dispatched", "partial", "completed", "disputed"].includes(order.status));
   return <>
     <ViewTitle title="Deliveries" subtitle="Track dispatch, inspect goods and confirm a handover." action={<button type="button" className="primary" onClick={() => navigate("deliveries", scanning ? "" : "scan")}>{scanning ? <Truck size={16} /> : <ScanLine size={16} />}{scanning ? "View deliveries" : "Scan delivery QR"}</button>} />
-    {scanning ? <Redeem key={initial} initial={initial} state={state} busy={busy} run={run} navigate={navigate} /> : <section className="card panel small-stack"><PanelTitle title="Delivery orders" />{deliveryOrders.map((order) => <button type="button" className="list-button" key={order.id} onClick={() => navigate("orders", order.id)}><span className="icon-tile amber"><Truck size={17} /></span><div><strong>{order.product}</strong><small>{order.reference} · {dateLabel(order.deliveryDate)} · {order.acceptedQuantity}/{order.quantity} accepted</small></div><Tag value={order.status} /></button>)}{!deliveryOrders.length && <Empty title="No deliveries yet" detail="Funded and dispatched orders will appear here." icon={QrCode} />}</section>}
+    {scanning ? <Redeem key={initial} initial={initial} state={state} busy={busy} run={run} navigate={navigate} /> : <section className="card panel small-stack"><PanelTitle title="Delivery orders" />{deliveryOrders.map((order) => <button type="button" className="list-button" key={order.id} onClick={() => navigate("orders", order.id)}><span className="icon-tile amber"><Truck size={17} /></span><div><strong>{order.product}</strong><small>{order.reference} · {dateLabel(order.deliveryDate)} · {order.acceptedQuantity}/{order.quantity} accepted</small></div><Tag value={orderStateLabel(order)} /></button>)}{!deliveryOrders.length && <Empty title="No deliveries yet" detail="Orders ready for dispatch will appear here." icon={QrCode} />}</section>}
   </>;
 }

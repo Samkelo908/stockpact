@@ -72,6 +72,6 @@ Browser checks use installed Microsoft Edge on Windows or Playwright Chromium on
 
 ## Hackathon alignment
 
-The published Node Engine tracks include Merchant & Machine Payments and Agentic Finance. StockPact uses buyer-approved procurement and testnet escrow to demonstrate that theme. The public page lists sponsor quests as forthcoming and does not identify a mandatory network, SDK, submission process or code-reuse rule. The repository uses a configurable EVM testnet setup. No ArcBot code was used. [Official Node Engine brief](https://w3node.io/node-engine)
+StockPact’s Ripple Agentic Finance flow uses **native XRP Ledger Testnet**. A verified handover can trigger a Workers AI payment request. An independent signing policy checks the buyer’s approved supplier, destination, pause state, and spending caps before signing. The existing EVM escrow remains a separate option. [Ripple demo setup and walkthrough](docs/ripple-demo.md) · [Official Node Engine brief](https://w3node.io/node-engine)
 
 See the [implementation checklist](docs/implementation.md) for scope and production dependencies.

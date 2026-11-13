@@ -1,4 +1,5 @@
 import type { EscrowStatus } from '../integrations/escrow/shared';
+import type { XrplState } from './xrpl';
 
 export const initialMarket = { country: 'ZA', currency: 'ZAR' } as const;
 
@@ -180,7 +181,8 @@ export interface Order {
   deliveryDate: string;
   location: string;
   status: 'approval' | 'awaiting_funding' | 'funded' | 'dispatched' | 'partial' | 'completed' | 'cancelled' | 'disputed';
-  paymentMode?: 'demo' | 'testnet';
+  paymentMode?: 'demo' | 'testnet' | 'xrpl';
+  xrplMandateId?: string;
   fundedCents: number;
   releasedCents: number;
   refundedCents: number;
@@ -242,6 +244,7 @@ export interface MarketplaceState {
   demo: boolean;
   aiMode: 'cloudflare' | 'demo';
   escrow: EscrowStatus;
+  xrpl?: XrplState;
   roles: { role: DemoRole; label: string; name: string }[];
   companies: Company[];
   listings: Listing[];

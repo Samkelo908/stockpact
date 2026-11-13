@@ -7,6 +7,7 @@ import { initialMarket, type Company, type Dispute, type MarketplaceState, type 
 import { cents, companyName, companyOf, type Navigate, type RunAction } from "./client";
 import { HostedVerification } from "./hosted-verification";
 import { Dialog, Empty, PanelTitle, Tag, ViewTitle, dateLabel, money, titleCase } from "./ui";
+import { XrplMandates } from "./xrpl-autopay";
 
 type Common = { state: MarketplaceState; busy: string; run: RunAction; navigate: Navigate; selected: string };
 type ReviewRecord = Review & { reply?: { body: string; at: string }; reported?: boolean; hidden?: boolean; moderationNote?: string };
@@ -28,6 +29,7 @@ export function SettingsView({ state, busy, run, selected, navigate }: Common) {
   return <>
     <ViewTitle title="Company settings" subtitle="Manage your company, verification and team access." action={owner ? <button type="button" className="secondary" onClick={() => setEdit(true)}><Building2 size={16} />Edit company</button> : undefined} />
     <div className="stack">
+      {selected === "xrpl" && <XrplMandates state={state} run={run} busy={busy} />}
       <div className="dashboard-grid">
         <section className="card panel stack"><PanelTitle title={company.name} subtitle={company.legalName} action={company.demo ? <Tag value="Fictional business" variant="amber" /> : undefined} />
           <dl className="details-grid"><div><dt>Country</dt><dd>{company.country}</dd></div><div><dt>Quote currency</dt><dd>{company.currency}</dd></div><div><dt>Business address</dt><dd>{company.location || "Add address"}</dd></div><div><dt>Registration</dt><dd>{company.registrationNumber || "Add registration number"}</dd></div><div><dt>Contact</dt><dd>{company.contact || "Add contact"}</dd></div><div><dt>Representative</dt><dd>{company.representative || "Add representative"}</dd></div><div><dt>Capabilities</dt><dd>{company.capabilities.map(titleCase).join(", ") || "None"}</dd></div><div><dt>Purchase approval threshold</dt><dd>{company.approvalThresholdCents != null ? money(company.approvalThresholdCents) : "Unset"}</dd></div></dl>
@@ -42,6 +44,7 @@ export function SettingsView({ state, busy, run, selected, navigate }: Common) {
         </section>
       </div>
       <WalletRegistration state={state} run={run} busy={busy} />
+      {selected !== "xrpl" && <XrplMandates state={state} run={run} busy={busy} />}
       <section className="card panel stack"><PanelTitle title="Team access" subtitle="Membership roles apply to the active company." />
         <div className="table-wrap"><table className="data-table"><thead><tr><th>Member</th><th>Email</th><th>Role</th></tr></thead><tbody>{state.team.map((member) => <tr key={member.id}><td>{member.name}</td><td>{member.email}</td><td>{titleCase(member.role)}</td></tr>)}</tbody></table></div>
         {!state.team.length && <Empty title="No other team members" detail="Company members and their roles are listed here." icon={Users} />}

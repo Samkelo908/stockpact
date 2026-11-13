@@ -21,3 +21,5 @@ The build creates and verifies `artifacts/StockPact.apk`. Keep the signing key i
 5. On phone 2, tap **Scan handover QR → Scan with camera**. Allow camera access, point it at phone 1, then review and confirm the demo release. Both devices show the updated order.
 
 This walkthrough uses fictional businesses and simulated funds. The protected demo link must stay online throughout the presentation. Rebuild against the replacement HTTPS origin if the demo link changes.
+
+For the Ripple track, follow the [XRPL Testnet walkthrough](../docs/ripple-demo.md) instead. That mode submits valueless test XRP to the native XRP Ledger and shows the validated receipt in the app.

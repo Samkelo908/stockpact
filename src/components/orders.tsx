@@ -8,6 +8,7 @@ import { AuthorizeTestnetDelivery, OrderFunding, RevokeTestnetDelivery } from ".
 import { companyName, csv, download, type Navigate, type RunAction } from "./client";
 import { QrDialog } from "./delivery-qr";
 import { Busy, Dialog, Empty, PanelTitle, Tag, ViewTitle, dateLabel, money, number } from "./ui";
+import { isXrplAvailable, orderStateLabel, xrplAmount, XrplActivity, XrplCheckout } from "./xrpl-autopay";
 
 type OrderProps = { state: MarketplaceState; order: Order; busy: string; run: RunAction; navigate: Navigate; startDraft: (draft: RequestDraft) => void };
 type PaymentMode = OrderTransaction["mode"];
@@ -39,13 +40,13 @@ function receipt(order: Order, transaction?: OrderTransaction) {
 
 export function Orders({ state, selected, busy, run, navigate, startDraft }: Omit<OrderProps, "order"> & { selected: string }) {
   const [query, setQuery] = useState("");
-  const orders = state.orders.filter((item) => `${item.product} ${item.reference} ${item.status}`.toLowerCase().includes(query.trim().toLowerCase()));
+  const orders = state.orders.filter((item) => `${item.product} ${item.reference} ${orderStateLabel(item)}`.toLowerCase().includes(query.trim().toLowerCase()));
   const order = orders.find((item) => item.id === selected) ?? orders[0];
   return <>
     <ViewTitle title="Orders" subtitle="Manage funding, dispatch, delivery acceptance and order records." />
     <div className="workspace-grid">
       <section className="card panel small-stack workspace-selector"><PanelTitle title="Order history" /><label className="field">Search orders<input type="search" value={query} onChange={(event) => setQuery(event.currentTarget.value)} placeholder="Product, reference or status" /></label>
-        {orders.map((item) => <button key={item.id} type="button" className="list-button" aria-pressed={order?.id === item.id} onClick={() => navigate("orders", item.id)}><div><strong>{item.product}</strong><small>{item.reference} · {money(item.totalCents)}</small></div><Tag value={item.status} /></button>)}
+        {orders.map((item) => <button key={item.id} type="button" className="list-button" aria-pressed={order?.id === item.id} onClick={() => navigate("orders", item.id)}><div><strong>{item.product}</strong><small>{item.reference} · {money(item.totalCents)}</small></div><Tag value={orderStateLabel(item)} /></button>)}
         {!orders.length && <Empty title={query ? "No matching orders" : "No orders yet"} detail={query ? "Try a different product or order reference." : "Accepted supplier quotes become orders."} icon={PackageCheck} />}
       </section>
       {order && <OrderDetail key={order.id} state={state} order={order} busy={busy} run={run} navigate={navigate} startDraft={startDraft} />}
@@ -64,7 +65,11 @@ function OrderDetail({ state, order, busy, run, navigate, startDraft }: OrderPro
   const canPay = buyer && ["owner", "approver"].includes(buyerRole);
   const sales = supplier && ["owner", "sales"].includes(state.actor?.role ?? "");
   const canInspect = canPay && ["dispatched", "partial"].includes(order.status);
-  const testnet = (order.paymentMode ?? state.escrow.mode) === "testnet";
+  const paymentMode = order.paymentMode ?? state.escrow.mode;
+  const xrpl = paymentMode === "xrpl";
+  const testnet = paymentMode === "testnet";
+  const canSettle = testnet || (state.escrow.mode === "demo" && state.actor?.demoRole);
+  const canEnableXrpl = isXrplAvailable(state, order);
   const outstanding = order.quantity - order.acceptedQuantity - (order.refundedQuantity ?? 0);
   const activeAuthorization = order.activeAuthorization;
   const driverList = state.team.filter((member) => member.role === "driver");
@@ -82,14 +87,14 @@ function OrderDetail({ state, order, busy, run, navigate, startDraft }: OrderPro
 
   return <div className="stack">
     <section className="card panel stack">
-      <PanelTitle title={order.product} subtitle={`${order.reference} · ${companyName(state, order.buyerId)} → ${companyName(state, order.supplierId)}`} action={<Tag value={order.status} />} />
-      <dl className="details-grid"><div><dt>Quoted total</dt><dd>{money(order.totalCents, order.currency)}</dd></div><div><dt>Accepted quantity</dt><dd>{number(order.acceptedQuantity)} / {number(order.quantity)} {order.unit}</dd></div><div><dt>Delivery area</dt><dd>{order.location}</dd></div><div><dt>Delivery commitment</dt><dd>{dateLabel(order.deliveryDate)}</dd></div><div><dt>Funds held</dt><dd>{testnet ? `${((order.fundedCents - order.releasedCents - order.refundedCents) / 100).toFixed(2)} test tokens` : money(order.fundedCents - order.releasedCents - order.refundedCents, order.currency)}</dd></div><div><dt>Released</dt><dd>{testnet ? `${(order.releasedCents / 100).toFixed(2)} test tokens` : money(order.releasedCents, order.currency)}</dd></div>{order.refundedQuantity ? <div><dt>Refunded quantity</dt><dd>{number(order.refundedQuantity)} {order.unit}</dd></div> : null}{order.packSize ? <div><dt>Pack size</dt><dd>{order.packSize} per pack</dd></div> : null}</dl>
+      <PanelTitle title={order.product} subtitle={`${order.reference} · ${companyName(state, order.buyerId)} → ${companyName(state, order.supplierId)}`} action={<Tag value={orderStateLabel(order)} />} />
+      <dl className="details-grid"><div><dt>Quoted total</dt><dd>{money(order.totalCents, order.currency)}</dd></div><div><dt>Accepted quantity</dt><dd>{number(order.acceptedQuantity)} / {number(order.quantity)} {order.unit}</dd></div><div><dt>Delivery area</dt><dd>{order.location}</dd></div><div><dt>Delivery commitment</dt><dd>{dateLabel(order.deliveryDate)}</dd></div>{xrpl ? <><div><dt>Payment method</dt><dd>XRPL Testnet autopay</dd></div><div><dt>Test amount for full delivery</dt><dd>{xrplAmount(order.totalCents, state.xrpl?.dropsPerZarCent)}</dd></div></> : <><div><dt>Funds held</dt><dd>{testnet ? `${((order.fundedCents - order.releasedCents - order.refundedCents) / 100).toFixed(2)} test tokens` : money(order.fundedCents - order.releasedCents - order.refundedCents, order.currency)}</dd></div><div><dt>Released</dt><dd>{testnet ? `${(order.releasedCents / 100).toFixed(2)} test tokens` : money(order.releasedCents, order.currency)}</dd></div></>}{order.refundedQuantity ? <div><dt>Refunded quantity</dt><dd>{number(order.refundedQuantity)} {order.unit}</dd></div> : null}{order.packSize ? <div><dt>Pack size</dt><dd>{order.packSize} per pack</dd></div> : null}</dl>
       {order.specification && <div className="subcard"><h3>Accepted specification</h3><p>{order.specification}</p></div>}
       {dispute && <div className="notice notice-warn"><AlertTriangle size={17} /><div><strong>Dispute open · {money(dispute.amountCents)} of quoted value</strong><p>{dispute.reason}</p></div></div>}
       {order.activeAuthorization && <div className="notice"><QrCode size={17} /><div><strong>{order.activeAuthorization.quantity} {order.unit} authorised</strong><p>{testnet ? "The supplier can accept with its linked wallet before the QR expires." : "The supplier or authorised driver can accept the handover before the QR expires."}</p></div></div>}
       <div className="button-row">
         {canPay && order.status === "approval" && <button type="button" className="primary" disabled={!!busy} onClick={() => void run("approveOrder", { orderId: order.id }, "Purchase approved.")}><ClipboardCheck size={16} />Approve purchase</button>}
-        {canPay && order.status === "awaiting_funding" && (testnet || (state.escrow.mode === "demo" && state.actor?.demoRole) ? <button type="button" className="primary" disabled={!!busy} onClick={() => setDialog("fund")}><Wallet size={16} />{testnet ? "Review payment" : "Reserve demo funds"}</button> : <div className="notice notice-warn"><Wallet size={16} />Testnet funding is unavailable for this company.</div>)}
+        {canPay && order.status === "awaiting_funding" && (canSettle || canEnableXrpl ? <button type="button" className="primary" disabled={!!busy} onClick={() => setDialog("fund")}><Wallet size={16} />{canEnableXrpl ? "Choose payment method" : testnet ? "Review payment" : "Reserve demo funds"}</button> : <div className="notice notice-warn"><Wallet size={16} />Testnet funding is unavailable for this company.</div>)}
         {canPay && ["approval", "awaiting_funding"].includes(order.status) && !order.transactions.some((item) => item.status === "pending") && <button type="button" className="secondary" disabled={!!busy} onClick={() => setDialog("cancel")}>Cancel order</button>}
         {sales && order.status === "funded" && <button type="button" className="primary" disabled={!!busy} onClick={() => void run("dispatchOrder", { orderId: order.id }, "Order marked dispatched.")}><Truck size={16} />Dispatch goods</button>}
         {sales && !testnet && ["funded", "dispatched", "partial"].includes(order.status) && driverList.length > 0 && <button type="button" className="secondary" disabled={!!busy} onClick={() => setDialog("driver")}><Truck size={16} />{order.driverId ? "Change driver" : "Assign driver"}</button>}
@@ -104,6 +109,7 @@ function OrderDetail({ state, order, busy, run, navigate, startDraft }: OrderPro
         <button type="button" className="secondary" onClick={() => receipt(order)}><Download size={16} />Order summary</button>
       </div>
     </section>
+    <XrplActivity state={state} order={order} busy={busy} run={run} />
     {order.transactions.length > 0 && <section className="card panel"><PanelTitle title="Payment activity" subtitle="Track settlement status and download confirmed records." /><TransactionList order={order} /></section>}
     <section className="card panel stack"><PanelTitle title="Order conversation" />
       {order.messages.length ? <div className="small-stack">{order.messages.map((item) => <div key={item.id} className="subcard"><div className="split-line"><h3>{item.author}</h3><time className="small-note" dateTime={item.createdAt}>{dateLabel(item.createdAt)}</time></div><p>{item.body}</p></div>)}</div> : <p className="small-note">No messages yet.</p>}
@@ -111,20 +117,21 @@ function OrderDetail({ state, order, busy, run, navigate, startDraft }: OrderPro
     </section>
     <OrderAttachments orderId={order.id} canUpload={buyer || supplier || state.actor?.id === order.driverId} />
     <section className="card panel"><PanelTitle title="Order timeline" /><ul className="timeline">{order.timeline.toReversed().map((item, index) => <li key={`${item.at}-${index}`}><Check size={14} /><span>{item.title}</span><time dateTime={item.at}>{dateLabel(item.at)}</time></li>)}</ul></section>
-    {dialog === "fund" && <FundingDialog state={state} order={order} busy={busy} run={run} onClose={() => setDialog(null)} />}
+    {dialog === "fund" && <FundingDialog state={state} order={order} busy={busy} run={run} navigate={navigate} onClose={() => setDialog(null)} />}
     {dialog === "cancel" && <Dialog title="Cancel this order?" onClose={() => setDialog(null)}><div className="stack"><p className="notice notice-warn"><AlertTriangle size={17} />This cancels {order.reference} and returns reserved stock to the supplier.</p><div><button type="button" className="danger" disabled={!!busy} onClick={async () => { if (await run("cancelOrder", { orderId: order.id }, "Order cancelled and stock reservation released.")) setDialog(null); }}>Confirm cancellation</button></div></div></Dialog>}
     {dialog === "accept" && <AcceptanceForm state={state} order={order} busy={busy} run={run} onClose={() => setDialog(null)} onAuthorized={(data) => { setDialog(null); setAuthorization(data); }} />}
     {dialog === "review" && <OrderForm dialog="review" order={order} busy={busy} run={run} onClose={() => setDialog(null)} />}
     {dialog === "dispute" && <OrderForm dialog="dispute" order={order} busy={busy} run={run} onClose={() => setDialog(null)} />}
     {dialog === "driver" && <OrderForm dialog="driver" order={order} busy={busy} run={run} drivers={driverList} onClose={() => setDialog(null)} />}
-    {authorization && <QrDialog authorization={authorization} mode={testnet ? "testnet" : "demo"} currency={order.currency} tokenSymbol={state.escrow.mode === "testnet" ? state.escrow.tokenSymbol : undefined} onClose={() => setAuthorization(null)} />}
+    {authorization && <QrDialog authorization={authorization} mode={xrpl ? "xrpl" : testnet ? "testnet" : "demo"} currency={order.currency} dropsPerCent={state.xrpl?.dropsPerZarCent} tokenSymbol={state.escrow.mode === "testnet" ? state.escrow.tokenSymbol : undefined} onClose={() => setAuthorization(null)} />}
   </div>;
 }
 
-function FundingDialog({ state, order, busy, run, onClose }: Pick<OrderProps, "state" | "order" | "busy" | "run"> & { onClose: () => void }) {
+function FundingDialog({ state, order, busy, run, navigate, onClose }: Pick<OrderProps, "state" | "order" | "busy" | "run" | "navigate"> & { onClose: () => void }) {
   const mode = state.escrow;
-  if (mode.mode === "disabled") return null;
   const testnet = mode.mode === "testnet";
+  const canUseEscrow = testnet || (mode.mode === "demo" && state.actor?.demoRole);
+  const canChoose = isXrplAvailable(state, order);
   const currency = order.currency ?? "ZAR";
   const goodsSubtotal = order.totalCents - order.taxCents - order.deliveryFeeCents;
   const pendingFunding = order.transactions.find((transaction) => transaction.kind === "funding" && transaction.status === "pending");
@@ -133,12 +140,12 @@ function FundingDialog({ state, order, busy, run, onClose }: Pick<OrderProps, "s
     if (await run("fundOrder", { orderId: order.id }, "Demo funds reserved.")) onClose();
   }
 
-  return <Dialog title="Review escrow payment" onClose={onClose}>
+  return <Dialog title={canChoose ? "Choose payment method" : "Review escrow payment"} onClose={onClose}>
     <div className="stack">
-      <div className="payment-checkout-total">
-        <div><span>Reserve in escrow</span><strong>{paymentAmount(order.totalCents, mode.mode, testnet ? mode.tokenSymbol : undefined, currency)}</strong></div>
+      {canUseEscrow && <div className="payment-checkout-total">
+        <div><span>Reserve in escrow</span><strong>{paymentAmount(order.totalCents, testnet ? "testnet" : "demo", testnet ? mode.tokenSymbol : undefined, currency)}</strong></div>
         <LockKeyhole aria-hidden="true" size={24} />
-      </div>
+      </div>}
       <div className="payment-checkout-order">
         <span className="payment-transaction-icon"><PackageCheck size={19} /></span>
         <div><strong>{order.product}</strong><span>{order.reference} · {companyName(state, order.supplierId)}</span></div>
@@ -149,12 +156,13 @@ function FundingDialog({ state, order, busy, run, onClose }: Pick<OrderProps, "s
         <div><dt>Tax</dt><dd>{money(order.taxCents, currency)}</dd></div>
         <div><dt>Quoted total</dt><dd>{money(order.totalCents, currency)}</dd></div>
       </dl>
-      <div className="payment-checkout-method">
+      {canUseEscrow && <><div className="payment-checkout-method">
         <ShieldCheck size={19} />
         <div><strong>{testnet ? `${mode.networkName} · ${mode.tokenSymbol}` : "Simulated payment"}</strong><p>Funds are reserved for {companyName(state, order.supplierId)} and released after a confirmed handover.</p></div>
       </div>
       {testnet ? <OrderFunding state={state} order={order} busy={busy} run={run} knownHash={pendingFunding?.hash} onFunded={onClose} /> :
-        <button type="button" className="primary payment-confirm" disabled={!!busy} onClick={() => void fundDemo()}><LockKeyhole size={16} />Confirm demo reserve</button>}
+        <button type="button" className="primary payment-confirm" disabled={!!busy} onClick={() => void fundDemo()}><LockKeyhole size={16} />Confirm demo reserve</button>}</>}
+      <XrplCheckout state={state} order={order} busy={busy} run={run} navigate={navigate} onDone={onClose} />
     </div>
   </Dialog>;
 }
@@ -164,6 +172,7 @@ function AcceptanceForm({ state, order, busy, run, onClose, onAuthorized }: { st
   const remaining = order.quantity - settled;
   const [existingQuantity] = useState(order.activeAuthorization?.quantity);
   const [quantity, setQuantity] = useState(existingQuantity ?? remaining);
+  const xrpl = order.paymentMode === "xrpl";
   const testnet = (order.paymentMode ?? state.escrow.mode) === "testnet";
   const valid = Number.isInteger(quantity) && quantity > 0 && quantity <= remaining;
   const amount = valid ? deliveryAmountCents(order.totalCents, order.quantity, settled, quantity) : 0;
@@ -177,8 +186,8 @@ function AcceptanceForm({ state, order, busy, run, onClose, onAuthorized }: { st
   }
 
   return <Dialog title="Inspect delivered goods" onClose={onClose}><form className="stack" onSubmit={(event) => void authorize(event)}><p className="small-note">Accept only the goods you checked. The remaining {order.unit} stay outstanding.</p><label className="field">Accepted {order.unit}<input type="number" min="1" max={remaining} required readOnly={existingQuantity != null} value={quantity || ""} onChange={(event) => setQuantity(Number(event.currentTarget.value))} /></label>
-    <div className="payment-checkout-total"><div><span>{testnet ? "Testnet release" : "Demo release"}</span><strong>{paymentAmount(amount, testnet ? "testnet" : "demo", state.escrow.mode === "testnet" ? state.escrow.tokenSymbol : undefined, order.currency)}</strong></div><QrCode size={24} /></div>
-    <div className="payment-checkout-method"><LockKeyhole size={17} /><p>{testnet ? "The supplier accepts the single-use QR with its linked wallet." : "The supplier or authorised driver confirms the release with the single-use QR."}</p></div>
+    <div className="payment-checkout-total"><div><span>{xrpl ? "XRPL Testnet autopay" : testnet ? "Testnet release" : "Demo release"}</span><strong>{xrpl ? xrplAmount(amount, state.xrpl?.dropsPerZarCent) : paymentAmount(amount, testnet ? "testnet" : "demo", state.escrow.mode === "testnet" ? state.escrow.tokenSymbol : undefined, order.currency)}</strong></div><QrCode size={24} /></div>
+    <div className="payment-checkout-method"><LockKeyhole size={17} /><p>{xrpl ? "After the supplier or assigned driver confirms this QR, the owner’s mandate determines if a Testnet payment is sent." : testnet ? "The supplier accepts the single-use QR with its linked wallet." : "The supplier or authorised driver confirms the release with the single-use QR."}</p></div>
     {testnet ? <AuthorizeTestnetDelivery state={state} order={order} quantity={quantity} busy={busy} run={run} onAuthorized={onAuthorized} /> : <div><button type="submit" className="primary" disabled={!canAuthorize}><QrCode size={16} />{existingQuantity != null ? "Show handover QR" : "Authorise & generate QR"}</button></div>}
   </form></Dialog>;
 }
@@ -282,7 +291,7 @@ export function Funds({ state, navigate, busy, run }: Pick<OrderProps, "state" |
       transactionKinds[transaction.kind].label, transaction.status, transaction.hash]
       .some((value) => value?.toLowerCase().includes(needle)));
   const canFund = state.actor && ["owner", "approver"].includes(state.actor.role) && (testnet || (mode.mode === "demo" && state.actor.demoRole));
-  const payable = canFund ? state.orders.filter((order) => order.buyerId === state.actor?.companyId && order.status === "awaiting_funding") : [];
+  const payable = state.orders.filter((order) => isXrplAvailable(state, order) || (canFund && order.buyerId === state.actor?.companyId && order.status === "awaiting_funding"));
   const checkout = payable.find((order) => order.id === fundingId);
   const filters = ["all", "funding", "release", "refund"] as const;
 
@@ -313,7 +322,7 @@ export function Funds({ state, navigate, busy, run }: Pick<OrderProps, "state" |
         </dl>
       </section>}
       {payable.length > 0 && <section className="card payment-due">
-        <PanelTitle title="Awaiting payment" subtitle="Reserve funds for your approved orders." />
+        <PanelTitle title="Awaiting payment" subtitle="Choose how to settle your approved orders." />
         {payable.map((order) => <div className="payment-due-row" key={order.id}>
           <span className="payment-transaction-icon"><PackageCheck size={18} /></span>
           <div className="payment-row-title"><strong>{order.product}</strong><span>{order.reference} · {companyName(state, order.supplierId)}</span></div>
@@ -321,6 +330,7 @@ export function Funds({ state, navigate, busy, run }: Pick<OrderProps, "state" |
           <button type="button" className="primary" disabled={!!busy} onClick={() => setFundingId(order.id)}>Review payment <ArrowRight size={15} /></button>
         </div>)}
       </section>}
+      <XrplActivity state={state} navigate={navigate} busy={busy} run={run} />
       <section className="card payment-ledger">
         <div className="payment-ledger-toolbar">
           <PanelTitle title="Transaction history" />
@@ -346,6 +356,6 @@ export function Funds({ state, navigate, busy, run }: Pick<OrderProps, "state" |
         })}</ul> : <Empty title={records.length ? "No matching transactions" : "No transactions yet"} detail={records.length ? "Try a different search or transaction type." : "Funding, releases and refunds will appear here."} icon={Wallet} />}
       </section>
     </div>
-    {checkout && <FundingDialog state={state} order={checkout} busy={busy} run={run} onClose={() => setFundingId(null)} />}
+    {checkout && <FundingDialog state={state} order={checkout} busy={busy} run={run} navigate={navigate} onClose={() => setFundingId(null)} />}
   </>;
 }
