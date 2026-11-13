@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useState, type FormEvent } from "react";
+import { createElement, useState, type FormEvent } from "react";
 import { ArrowRight, Boxes, ClipboardList, Coffee, Download, Droplets, Heart, MapPin, Package, Plus, Search, ShoppingBag, Star, Store, Upload } from "lucide-react";
 import type { Listing, MarketplaceState, RequestDraft } from "../shared/marketplace";
 import { cents, companyOf, csv, download, type Navigate, type RunAction } from "./client";
@@ -25,6 +25,14 @@ function catalogueIcon(category: string) {
   if (/packaging|office/i.test(category)) return Boxes;
   if (/food/i.test(category)) return Coffee;
   return ShoppingBag;
+}
+
+function CataloguePhoto({ listing }: { listing: Listing }) {
+  const [failed, setFailed] = useState(false);
+  const source = listing.demo ? cataloguePhotos[listing.id] : undefined;
+  return source && !failed
+    ? <Image src={source} alt="" fill unoptimized onError={() => setFailed(true)} />
+    : createElement(catalogueIcon(listing.category), { size: 40, strokeWidth: 1.4, "aria-hidden": true });
 }
 
 const singularUnits: Record<string, string> = { cases: "case", boxes: "box", bottles: "bottle", bags: "bag", packs: "pack", units: "unit" };
@@ -110,12 +118,10 @@ export function Marketplace({ state, busy, run, query, setQuery, startDraft }: C
       </div>
       {!current.length ? <section className="card panel"><Empty title="No matching listings" detail="Try another product, supplier or delivery area." icon={Store} action={<button type="button" className="secondary" onClick={resetFilters}>Clear filters</button>} /></section> :
         <div className="market-grid">{current.map((listing) => {
-          const image = listing.demo ? cataloguePhotos[listing.id] : undefined;
-          const Icon = catalogueIcon(listing.category);
           const favourite = state.favorites.includes(listing.id);
           return <article className="market-listing" key={listing.id}>
             <div className="market-photo">
-              {image ? <Image src={image} alt="" fill sizes="(max-width: 360px) 100vw, (max-width: 760px) 50vw, 33vw" /> : <Icon size={40} strokeWidth={1.4} aria-hidden="true" />}
+              <CataloguePhoto listing={listing} />
               <button type="button" className="icon-button market-favourite" disabled={!!busy} aria-label={`${favourite ? "Remove from" : "Add to"} favourites: ${listing.name}`} aria-pressed={favourite} onClick={() => void run("toggleFavorite", { listingId: listing.id })}><Heart size={18} /></button>
             </div>
             <div className="market-product">

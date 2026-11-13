@@ -73,7 +73,7 @@ export function Dashboard({ state, prompt, setPrompt, busy, generate, setDraft, 
         </div>
       </div>
       <figure className="sourcing-photo">
-        <Image src="/cape-town-shop-delivery.webp" alt="A Cape Town shop owner checks her phone as a supplier delivers a box of stock" fill unoptimized preload />
+        <Image src="/cape-town-shop-delivery.webp" alt="A Cape Town shop owner checks her phone as a supplier delivers a box of stock" fill unoptimized loading="eager" />
         <figcaption><MapPin size={13} aria-hidden="true" />Cape Town, South Africa</figcaption>
       </figure>
     </section>}
