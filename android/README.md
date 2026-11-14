@@ -26,4 +26,10 @@ For the Ripple track, follow the [XRPL Testnet walkthrough](../docs/ripple-demo.
 
 XRPL Testnet autopay runs on the workspace server and needs no wallet app on either phone. The order shows delivery and payment separately. The buyer owner can request another decision for a blocked handover before a transaction has been signed. The EVM escrow flow requires a browser with a connected EVM wallet.
 
-For the private two-phone demo, run `node android/demo-gateway.mjs` with `STOCKPACT_PHONE_ORIGIN` set to the HTTPS app origin, a random 24-character or longer URL-safe `STOCKPACT_PHONE_ACCESS_CODE`, and a random 32-byte hex `STOCKPACT_PHONE_SESSION_KEY`. Set the app’s `BETTER_AUTH_URL` to the same origin. Point the HTTPS tunnel to the gateway on loopback port 3116. The demo server runs on loopback port 3112. Supply the code privately to each tester. If the temporary HTTPS hostname changes, update both origins and rebuild the APK.
+## Host a private demo
+
+1. Use a demo-only StockPact database. Set `STOCKPACT_DEMO=true` and set `BETTER_AUTH_URL` to the HTTPS workspace origin. Set up simulated settlement or follow the [XRPL Testnet configuration](../docs/ripple-demo.md#private-workspace-setup).
+2. Build the Next.js app with `npm run build` and run `npm start -- --port 3112` on loopback.
+3. Set `STOCKPACT_PHONE_ORIGIN` to the same HTTPS origin, `STOCKPACT_PHONE_ACCESS_CODE` to a random 24–64 character URL-safe code, and `STOCKPACT_PHONE_SESSION_KEY` to a random 32-byte hex key in the gateway process environment. Run `node android/demo-gateway.mjs` in a separate terminal.
+4. Point the HTTPS tunnel at the gateway on loopback port 3116. The gateway prompts for the access code and proxies authenticated requests to the app on port 3112. Keep the app, gateway and tunnel running during the demo. Send the code privately to each tester.
+5. Build the APK for that HTTPS origin and install it on both devices. If the temporary hostname changes, update both origins and rebuild the APK. Run the background scheduler against the app’s loopback endpoint with the configured job secret.
