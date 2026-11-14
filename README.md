@@ -4,9 +4,24 @@
 
 StockPact gives a shop owner, caterer or purchasing team one place to find stock, ask suppliers questions, compare delivered quotes and confirm what arrived. Young suppliers and independent wholesalers can list inventory, reach nearby buyers, quote for real requests and build a reputation through completed orders. Samkelo Maswana built StockPact for the Node Engine hackathon.
 
-![Illustration of a Cape Town shop owner checking her phone as a supplier delivers stock](public/cape-town-shop-delivery.webp)
+[Download StockPact for Android](https://github.com/Samkelo908/stockpact/releases/download/android-demo-v0.1.5/StockPact-0.1.5.apk) · [Install on two phones](#download-and-install-on-android) · [Watch on YouTube](https://youtu.be/g6F0hIBRZw4) · [How we used Ripple’s resources](#how-we-used-the-ripple-hackathon-resources) · [Run locally](#run-locally)
 
-[Download the signed Android APK](https://github.com/Samkelo908/stockpact/releases/download/android-demo-v0.1.5/StockPact-0.1.5.apk) · [Two-phone walkthrough](#two-phone-ripple-demo) · [Run locally](#run-locally) · [Technical setup](#configure-a-private-workspace)
+## Watch the StockPact video
+
+[![Watch StockPact Africa on YouTube](https://i.ytimg.com/vi/g6F0hIBRZw4/hqdefault.jpg)](https://youtu.be/g6F0hIBRZw4)
+
+Watch Samkelo Maswana’s StockPact Africa presentation. [StockPact Africa on YouTube](https://youtu.be/g6F0hIBRZw4)
+
+## Download and install on Android
+
+1. On each Android phone, sign in to GitHub with an account that can access the private StockPact repo. Open the [direct APK download](https://github.com/Samkelo908/stockpact/releases/download/android-demo-v0.1.5/StockPact-0.1.5.apk), or open the [release page](https://github.com/Samkelo908/stockpact/releases/tag/android-demo-v0.1.5), expand **Assets**, and tap **StockPact-0.1.5.apk**.
+2. Open **StockPact-0.1.5.apk** from your phone’s **Downloads** and tap **Install**. Android 8.0 or later is required. If Android asks for permission, tap **Settings**, enable **Allow from this source** for the app that opened the APK, and return to the installer.
+3. Launch **StockPact** from the Android launcher. Enter the access code shared privately by the workspace host. The signed APK connects to the host’s HTTPS workspace, so the workspace must be online and both phones need internet access.
+4. On phone 1, stay in **Buyer · Harbour Table**. On phone 2, open the account menu and switch to **Supplier · Cape Supply Co.** Allow camera or microphone access when you choose to use those features. [Two-phone walkthrough](#two-phone-ripple-demo)
+
+If GitHub shows **404**, check that you’re signed in to an account with repo access, or ask the workspace host to send you the signed APK. If StockPact shows **Reconnect**, sign in again and retry your action. StockPact keeps the in-progress sourcing draft during sign-in. If the workspace’s temporary HTTPS address changes, install an APK built for the new address. [Build an APK for another workspace](android/README.md)
+
+![Illustration of a Cape Town shop owner checking her phone as a supplier delivers stock](public/cape-town-shop-delivery.webp)
 
 ## Why StockPact
 
@@ -41,14 +56,28 @@ The first market uses South African rand, Cape Town delivery areas and South Afr
 5. **Inspect and confirm.** Record the quantity that arrived. The buyer displays the handover QR and the supplier scans it from **Deliveries**. Review the handover before confirming it.
 6. **Close the loop.** Check delivery and payment statuses, download the relevant receipt, and leave a review once the purchase is eligible. Use **Buy again** to start a new request from the order.
 
-## Install on Android
+## How we used the Ripple hackathon resources
 
-1. Download [StockPact 0.1.5](https://github.com/Samkelo908/stockpact/releases/tag/android-demo-v0.1.5) from the private GitHub release. Install the APK on an Android 8.0 or later device. Android may prompt you to allow installs from the app used to open the file.
-2. Launch **StockPact** from the Android launcher. The APK opens the workspace in its own Android window.
-3. Enter the private workspace access code supplied by the workspace host. Both phones need internet access and the same workspace. Allow camera or microphone access when you choose to use those features.
-4. If you see **Reconnect**, use it to sign in again. StockPact keeps an in-progress sourcing draft during sign-in so you can retry. If the host changes the temporary HTTPS address, ask for an APK built for the new address.
+We used two materials from the Node Engine **Agentic Finance** track on BuilderBase. The *START HERE – Agentic Finance Resources* handout (pp. 1–2) defined the CFO challenge and the MVP criteria. The *XRPL Workshop Slides* (slides 7 and 9–15) showed how to choose a test network, fund a test account, send a native XRP payment and verify the result. The wallet and spending-control examples in the workshop informed how StockPact separates the agent’s decision from payment signing. [Node Engine track](https://w3node.io/node-engine) · [Ripple workshop recording, 5 November 2026](https://us02web.zoom.us/rec/share/ysQjnz16FqdWWCu601CjZ208DW38soAxEvuafrW6D5Lyk7YWEF9lTHVv63keeLR4.7EW47O_K4g8SOZYw) · [Participant Hub](https://docs.google.com/document/d/1fWs5qM31ZCN2Ij4yIZdMWr3JjHSrohsNjg4lQXl1ABw/edit)
 
-The APK includes a WebView and Android integration for the camera, microphone and downloads. The application and shared records are served by the StockPact HTTPS backend. The signed demo APK needs its private workspace online. To create an APK for another environment, use the [Android build instructions](android/README.md).
+### Ripple’s MVP criteria in StockPact
+
+| What Ripple asked teams to demonstrate | How StockPact implements it |
+| --- | --- |
+| **An autonomous transaction on XRP Ledger Testnet or Devnet** | After the buyer inspects the goods and the supplier confirms the QR handover, StockPact queues the payment automatically. The Workers AI agent checks the recorded evidence and returns a request to pay or hold. When it requests payment and the signer approves the policy checks, the backend signs and submits a native XRP Ledger Testnet payment without a separate human approval for that transfer. [Handover](src/server/orders.ts) · [AI decision](src/integrations/purchasing.ts) · [Payment job](src/server/xrpl.ts) |
+| **Limits enforced outside the agent** | StockPact uses the independent-service option described in the handout. The signing path checks the confirmed handover, verified parties, the configured supplier and payout address, the amount, and the mandate’s per-payment and total caps. It counts both spent and reserved XRP against the total so simultaneous payments cannot use the same remaining allowance. The model receives only the handover facts needed for its decision. The signing key and enforcement logic stay on the server. [Policy checks](src/server/xrpl-policy.ts) · [Payment reservation](src/server/xrpl.ts) |
+| **Human control over the limits** | The buyer company owner approves a supplier mandate in **Company settings → XRPL Testnet autopay**. The owner can edit the caps or pause and resume the mandate. Pausing blocks new authorizations. The job keeps checking any transaction already authorized for submission. [Mandate controls](src/components/xrpl-autopay.tsx) |
+| **A blocked case and an audit trail** | In the recorded run, the first handover paid **2.67 test XRP**. The second handover asked for **1.78 test XRP** with **1.33 test XRP** left under the mandate. The second payment was blocked before signing. The order shows both delivery and payment statuses and the policy reason. The audit log records the agent decision, signing authorization and settlement outcome. [Recorded Testnet receipt](https://testnet.xrpl.org/transactions/4AE9767AB2F16255AD38FF84D51EF60D3C58204FD9112C994CDFA3D9C51CCF8E) · [Reproduce the demo](docs/ripple-demo.md) |
+| **A specific customer and a path to adoption** | The first customer is a small shop or food business that buys repeatedly from local wholesalers. The pilot would bring Cape Town buyers and suppliers into one workspace for quotes, delivery and payment records, then measure whether they complete orders and come back. [Pilot and business model](#business-model-and-next-milestones) |
+
+### Workshop guidance applied to the ledger integration
+
+1. **Choose native XRPL Testnet and fund test accounts.** The workshop explains the test networks and faucet. We used separate faucet-funded Testnet accounts for the server signer and supplier recipient. The signer checks that the node reports Testnet and a recent validated ledger. [XRPL network guide](https://xrpl.org/docs/concepts/networks-and-servers/parallel-networks) · [Official Testnet faucet](https://xrpl.org/resources/dev-tools/xrp-faucets)
+2. **Build and sign a native `Payment`.** The workshop example supplies the transaction pattern. StockPact uses the `xrpl` JavaScript SDK to load the server-side test wallet and sign a payment for an exact number of drops. The adapter sets the verified destination, bounded fee, account sequence and `LastLedgerSequence`. It uses HTTPS JSON-RPC to submit and look up transactions. [xrpl.js documentation](https://js.xrpl.org/) · [StockPact XRPL adapter](src/integrations/xrpl/server.ts)
+3. **Save the signed transaction before submission.** The job persists the signed data and its hash before broadcasting. If the response is interrupted, it can reconcile or resubmit the same signed transaction. A used handover cannot create another payment intent. [Reliable transaction submission](https://xrpl.org/docs/concepts/transactions/reliable-transaction-submission) · [StockPact payment job](src/server/xrpl.ts)
+4. **Verify the receipt and show it in the order.** The adapter checks the transaction hash, validated ledger, destination, delivered amount and `tesSUCCESS` before recording the payment as confirmed. The order shows the hash and an explorer link so a judge can check the result independently. [Recorded Testnet receipt](https://testnet.xrpl.org/transactions/4AE9767AB2F16255AD38FF84D51EF60D3C58204FD9112C994CDFA3D9C51CCF8E)
+
+The [XRPL AI Starter Kit](https://xrpl.org/docs/agents/agentic-transactions) informed the trigger, decision, transaction and logging flow. The workshop also presented Privy, Open Wallet Standard, t54, x402, MPP, the XRPL Docs MCP server and RLUSD as options. This submission’s payment path uses **native test XRP**, a dedicated server-side Testnet wallet, StockPact’s own policy checks and Cloudflare Workers AI. The optional EVM escrow in this repo is a separate app feature. The [Ripple setup guide](docs/ripple-demo.md) covers the native Testnet path.
 
 ## Two-phone Ripple demo
 
